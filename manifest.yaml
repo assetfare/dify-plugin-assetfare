@@ -36,3 +36,4 @@ meta:
     entrypoint: main
 tags:
   - utilities
+  - finance

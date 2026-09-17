@@ -47,3 +47,7 @@ The plugin collects no user personal data. See [`PRIVACY.md`](PRIVACY.md).
 
 - Source repository: <https://github.com/odaiin/dify-plugin-assetfare>
 - Contact: support@assetfare.dev
+
+## License
+
+MIT — see [LICENSE](LICENSE).

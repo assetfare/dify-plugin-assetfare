@@ -316,8 +316,10 @@ class AssetFareClient:
             _fail("assetfare_response_invalid")
         self._no_sign(risk)
 
-        # execution: supported, verified-receipts flag true
+        # execution: supported, first-unsigned-action flag (bool), verified-receipts flag true
         if execution.get("supported") is not True:
+            _fail("assetfare_response_invalid")
+        if not isinstance(execution.get("first_unsigned_action_supported"), bool):
             _fail("assetfare_response_invalid")
         if execution.get("future_actions_require_verified_receipts") is not True:
             _fail("assetfare_response_invalid")

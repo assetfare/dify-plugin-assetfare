@@ -16,58 +16,78 @@ parameters:
     form: llm
     label:
       en_US: Source chain
+      zh_Hans: 源链
+    human_description:
+      en_US: The source chain to move value from.
+      zh_Hans: 转出价值的源链。
     llm_description: source chain, one of solana, base, arbitrum, robinhood
     options:
       - value: solana
-        label: {en_US: solana}
+        label: {en_US: solana, zh_Hans: solana}
       - value: base
-        label: {en_US: base}
+        label: {en_US: base, zh_Hans: base}
       - value: arbitrum
-        label: {en_US: arbitrum}
+        label: {en_US: arbitrum, zh_Hans: arbitrum}
       - value: robinhood
-        label: {en_US: robinhood}
+        label: {en_US: robinhood, zh_Hans: robinhood}
   - name: from_token
     type: select
     required: true
     form: llm
     label:
       en_US: Source token
+      zh_Hans: 源资产
+    human_description:
+      en_US: The source asset symbol to move value from.
+      zh_Hans: 转出价值的源资产符号。
     llm_description: source asset symbol, one of SOL, ETH, USDC, USDG
     options:
-      - {value: SOL, label: {en_US: SOL}}
-      - {value: ETH, label: {en_US: ETH}}
-      - {value: USDC, label: {en_US: USDC}}
-      - {value: USDG, label: {en_US: USDG}}
+      - {value: SOL, label: {en_US: SOL, zh_Hans: SOL}}
+      - {value: ETH, label: {en_US: ETH, zh_Hans: ETH}}
+      - {value: USDC, label: {en_US: USDC, zh_Hans: USDC}}
+      - {value: USDG, label: {en_US: USDG, zh_Hans: USDG}}
   - name: to_chain
     type: select
     required: true
     form: llm
     label:
       en_US: Destination chain
+      zh_Hans: 目标链
+    human_description:
+      en_US: The destination chain to receive value on.
+      zh_Hans: 接收价值的目标链。
     llm_description: destination chain, one of solana, base, arbitrum, robinhood
     options:
-      - {value: solana, label: {en_US: solana}}
-      - {value: base, label: {en_US: base}}
-      - {value: arbitrum, label: {en_US: arbitrum}}
-      - {value: robinhood, label: {en_US: robinhood}}
+      - {value: solana, label: {en_US: solana, zh_Hans: solana}}
+      - {value: base, label: {en_US: base, zh_Hans: base}}
+      - {value: arbitrum, label: {en_US: arbitrum, zh_Hans: arbitrum}}
+      - {value: robinhood, label: {en_US: robinhood, zh_Hans: robinhood}}
   - name: to_token
     type: select
     required: true
     form: llm
     label:
       en_US: Destination token
+      zh_Hans: 目标资产
+    human_description:
+      en_US: The destination asset symbol to receive.
+      zh_Hans: 接收的目标资产符号。
     llm_description: destination asset symbol, one of SOL, ETH, USDC, USDG
     options:
-      - {value: SOL, label: {en_US: SOL}}
-      - {value: ETH, label: {en_US: ETH}}
-      - {value: USDC, label: {en_US: USDC}}
-      - {value: USDG, label: {en_US: USDG}}
+      - {value: SOL, label: {en_US: SOL, zh_Hans: SOL}}
+      - {value: ETH, label: {en_US: ETH, zh_Hans: ETH}}
+      - {value: USDC, label: {en_US: USDC, zh_Hans: USDC}}
+      - {value: USDG, label: {en_US: USDG, zh_Hans: USDG}}
   - name: amount_usd
     type: number
     required: true
     form: llm
     label:
       en_US: Amount (USD)
+      zh_Hans: 金额（美元）
+    human_description:
+      en_US: Notional amount in USD, between 1 and 1000 inclusive.
+      zh_Hans: 名义金额（美元），介于 1 到 1000（含）。
     llm_description: notional in USD, between 1 and 1000 inclusive
     min: 1
     max: 1000

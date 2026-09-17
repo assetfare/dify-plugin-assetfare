@@ -324,3 +324,18 @@ def test_iter_content_error_sanitized():
         AssetFareClient(session=s).get_capabilities()
     assert "SECRETMARKER" not in str(ei.value)
     assert ei.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q["execution"].pop("first_unsigned_action_supported"),  # missing
+        lambda q: q["execution"].update(first_unsigned_action_supported="yes"),  # wrong type
+        lambda q: q["execution"].update(first_unsigned_action_supported=1),  # int, not bool
+    ],
+)
+def test_quote_execution_first_unsigned_flag_rejected(mut):
+    q = valid_quote("solana", "USDC", "base", "ETH", 250)
+    mut(q)
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
