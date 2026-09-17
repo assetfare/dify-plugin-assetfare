@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="AssetFare">
+  <rect width="128" height="128" rx="26" fill="#0B1220"/>
+  <circle cx="34" cy="64" r="15" fill="none" stroke="#4F8CFF" stroke-width="6"/>
+  <circle cx="94" cy="64" r="15" fill="none" stroke="#38E1A6" stroke-width="6"/>
+  <path d="M49 64 H79" stroke="#E6ECF5" stroke-width="6" stroke-linecap="round"/>
+  <path d="M72 55 L83 64 L72 73" fill="none" stroke="#E6ECF5" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M34 64 l0 -0" />
+  <text x="64" y="104" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" fill="#9FB3C8">AF</text>
+</svg>

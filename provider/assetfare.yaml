@@ -1,0 +1,17 @@
+identity:
+  author: odaiin
+  name: assetfare
+  label:
+    en_US: AssetFare
+    zh_Hans: AssetFare
+  description:
+    en_US: Read-only non-custodial cross-chain route quotes across Solana, Base, Arbitrum, and Robinhood Chain.
+    zh_Hans: Solana、Base、Arbitrum、Robinhood 链之间的只读非托管跨链路由报价。
+  icon: icon.svg
+credentials_for_provider: {}
+tools:
+  - tools/assetfare_capabilities.yaml
+  - tools/assetfare_quote.yaml
+extra:
+  python:
+    source: provider/assetfare.py

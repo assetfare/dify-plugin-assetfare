@@ -1,0 +1,15 @@
+identity:
+  author: odaiin
+  name: assetfare_capabilities
+  label:
+    en_US: Get AssetFare capabilities
+    zh_Hans: 获取 AssetFare 能力
+description:
+  human:
+    en_US: List the AssetFare chains, assets, routes, and confirm the server cannot sign or submit. Read-only.
+    zh_Hans: 列出 AssetFare 支持的链、资产、路由，并确认服务器不会签名或提交。只读。
+  llm: List the four supported chains, nine (chain, token) asset endpoints, the 72 directed routes, and the USD 1-1000 quote band. Read-only; no wallet or key.
+parameters: []
+extra:
+  python:
+    source: tools/assetfare_capabilities.py

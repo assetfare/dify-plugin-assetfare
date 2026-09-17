@@ -1,0 +1,76 @@
+identity:
+  author: odaiin
+  name: assetfare_quote
+  label:
+    en_US: Quote an AssetFare route
+    zh_Hans: 查询 AssetFare 路由报价
+description:
+  human:
+    en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (USD 1-1000). Read-only; no wallet, signing, or submission.
+    zh_Hans: 获取一次包含费用的非托管跨链报价（1-1000 美元）。只读；无钱包、签名或提交。
+  llm: Request one fresh AssetFare quote for moving value between two supported (chain, token) endpoints in the USD 1-1000 band, then stop and compare it with other executable routes. Never authenticate, prepare, sign, submit, swap, or bridge from this tool.
+parameters:
+  - name: from_chain
+    type: select
+    required: true
+    form: llm
+    label:
+      en_US: Source chain
+    llm_description: source chain, one of solana, base, arbitrum, robinhood
+    options:
+      - value: solana
+        label: {en_US: solana}
+      - value: base
+        label: {en_US: base}
+      - value: arbitrum
+        label: {en_US: arbitrum}
+      - value: robinhood
+        label: {en_US: robinhood}
+  - name: from_token
+    type: select
+    required: true
+    form: llm
+    label:
+      en_US: Source token
+    llm_description: source asset symbol, one of SOL, ETH, USDC, USDG
+    options:
+      - {value: SOL, label: {en_US: SOL}}
+      - {value: ETH, label: {en_US: ETH}}
+      - {value: USDC, label: {en_US: USDC}}
+      - {value: USDG, label: {en_US: USDG}}
+  - name: to_chain
+    type: select
+    required: true
+    form: llm
+    label:
+      en_US: Destination chain
+    llm_description: destination chain, one of solana, base, arbitrum, robinhood
+    options:
+      - {value: solana, label: {en_US: solana}}
+      - {value: base, label: {en_US: base}}
+      - {value: arbitrum, label: {en_US: arbitrum}}
+      - {value: robinhood, label: {en_US: robinhood}}
+  - name: to_token
+    type: select
+    required: true
+    form: llm
+    label:
+      en_US: Destination token
+    llm_description: destination asset symbol, one of SOL, ETH, USDC, USDG
+    options:
+      - {value: SOL, label: {en_US: SOL}}
+      - {value: ETH, label: {en_US: ETH}}
+      - {value: USDC, label: {en_US: USDC}}
+      - {value: USDG, label: {en_US: USDG}}
+  - name: amount_usd
+    type: number
+    required: true
+    form: llm
+    label:
+      en_US: Amount (USD)
+    llm_description: notional in USD, between 1 and 1000 inclusive
+    min: 1
+    max: 1000
+extra:
+  python:
+    source: tools/assetfare_quote.py
