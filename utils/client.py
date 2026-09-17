@@ -13,18 +13,22 @@ import json
 import math
 import time
 import uuid
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
 import requests
 
 _ALLOWED_ORIGIN = "https://api.assetfare.dev"
-# Per-request socket timeout (requests: connect + read). Also used as the total
-# monotonic budget shared across the two capability calls (see get_capabilities).
+# The requests socket timeout is per connect/read inactivity; on top of it we
+# enforce a real total monotonic deadline across the whole call (below), so a
+# slow drip stream cannot make an agent hang past the budget.
 _SOCKET_TIMEOUT_S = 45.0
+_TOTAL_DEADLINE_S = 45.0
 _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 86_400
+_MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
 _CHAINS = ("arbitrum", "base", "robinhood", "solana")
 _ENDPOINTS = frozenset(
@@ -78,22 +82,27 @@ def _validate_origin(base_url: str) -> str:
 
 
 class AssetFareClient:
-    def __init__(self, base_url: str = _ALLOWED_ORIGIN, session: requests.Session | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str = _ALLOWED_ORIGIN,
+        session: requests.Session | None = None,
+        monotonic: Callable[[], float] | None = None,
+        utcnow: Callable[[], datetime] | None = None,
+    ) -> None:
         self.base_url = _validate_origin(base_url)
         self._session = session or requests.Session()
         self._session.trust_env = False
+        # Injectable clocks (tests supply fakes). `monotonic` drives the total
+        # deadline; `utcnow` (timezone-aware UTC) drives the quote freshness check.
+        self._monotonic = monotonic or time.monotonic
+        self._utcnow = utcnow or (lambda: datetime.now(UTC))
 
     # ---- transport ----
-    def _request(
-        self, method: str, path: str, payload: dict[str, Any] | None, deadline: float | None
-    ) -> dict[str, Any]:
-        if deadline is not None:
-            timeout = deadline - time.monotonic()
-            if timeout <= 0:
-                _fail("assetfare_upstream_unavailable")
-            timeout = min(_SOCKET_TIMEOUT_S, timeout)
-        else:
-            timeout = _SOCKET_TIMEOUT_S
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None, deadline: float) -> dict[str, Any]:
+        remaining = deadline - self._monotonic()
+        if remaining <= 0:
+            _fail("assetfare_upstream_unavailable")
+        timeout = min(_SOCKET_TIMEOUT_S, remaining)
         try:
             resp = self._session.request(
                 method,
@@ -126,6 +135,10 @@ class AssetFareClient:
                 chunks: list[bytes] = []
                 total = 0
                 for chunk in resp.iter_content(chunk_size=65536):
+                    # Enforce the total monotonic budget even under a slow drip
+                    # stream whose individual chunks each beat the socket timeout.
+                    if self._monotonic() >= deadline:
+                        _fail("assetfare_upstream_unavailable")
                     if not chunk:
                         continue
                     total += len(chunk)
@@ -181,7 +194,7 @@ class AssetFareClient:
 
     # ---- read-only capabilities ----
     def get_capabilities(self) -> dict[str, Any]:
-        deadline = time.monotonic() + _SOCKET_TIMEOUT_S
+        deadline = self._monotonic() + _TOTAL_DEADLINE_S
         caps = self._request("GET", "/v2/capabilities", None, deadline)
         status = self._request("GET", "/v2/status", None, deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
@@ -229,7 +242,7 @@ class AssetFareClient:
         to_u = self._endpoint(to_chain, to_token, "destination")
         if (from_chain, from_u) == (to_chain, to_u):
             raise AssetFareError("assetfare_identity_route_rejected")
-        deadline = time.monotonic() + _SOCKET_TIMEOUT_S
+        deadline = self._monotonic() + _TOTAL_DEADLINE_S
         data = self._request(
             "POST",
             "/v2/quote",
@@ -255,15 +268,26 @@ class AssetFareClient:
             uuid.UUID(str(data.get("quote_id")))
         except (ValueError, AttributeError, TypeError):
             _fail("assetfare_response_invalid")
-        as_of = data.get("as_of")
-        if not isinstance(as_of, str) or "T" not in as_of:  # require a full datetime, not a date
-            _fail("assetfare_response_invalid")
-        try:
-            datetime.fromisoformat(as_of)  # Python >= 3.11 parses the trailing 'Z'
-        except ValueError:
-            _fail("assetfare_response_invalid")
         ttl = data.get("ttl_seconds")
         if not _int(ttl) or not (0 < ttl <= _MAX_TTL_SECONDS):
+            _fail("assetfare_response_invalid")
+        # as_of must be an RFC3339 timezone-aware datetime (Z or numeric offset);
+        # a naive (no timezone) timestamp is rejected.
+        as_of = data.get("as_of")
+        if not isinstance(as_of, str) or "T" not in as_of:
+            _fail("assetfare_response_invalid")
+        try:
+            as_of_dt = datetime.fromisoformat(as_of)  # Python >= 3.11 parses the trailing 'Z'
+        except ValueError:
+            _fail("assetfare_response_invalid")
+        if as_of_dt.tzinfo is None or as_of_dt.utcoffset() is None:
+            _fail("assetfare_response_invalid")
+        now = self._utcnow()
+        # Reject an as_of stamped excessively in the future (clock-skew / forgery),
+        # and a quote whose expiry (as_of + ttl) has already passed (stale).
+        if as_of_dt > now + timedelta(seconds=_MAX_FUTURE_SKEW_S):
+            _fail("assetfare_response_invalid")
+        if as_of_dt + timedelta(seconds=ttl) < now:
             _fail("assetfare_response_invalid")
 
         expected_from = f"{from_chain}:{from_u}"

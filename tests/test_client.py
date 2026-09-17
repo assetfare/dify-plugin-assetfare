@@ -1,11 +1,22 @@
 import json
 import os
 import sys
+from datetime import UTC, datetime
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.client import AssetFareClient, AssetFareError
+
+# Fixed "now" so the fixed-timestamp quote fixture (as_of 2026-09-17T00:00:00Z,
+# ttl 30) is fresh (10s in). Tests inject this so they do not depend on wall time.
+FIXED_NOW = datetime(2026, 9, 17, 0, 0, 10, tzinfo=UTC)
+
+
+def af(**kwargs):
+    kwargs.setdefault("utcnow", lambda: FIXED_NOW)
+    return AssetFareClient(**kwargs)
+
 
 ENDPOINTS = [
     ("solana", "SOL"),
@@ -108,7 +119,7 @@ class _Session:
 
 
 def client(routes):
-    return AssetFareClient(session=_Session(routes))
+    return af(session=_Session(routes))
 
 
 # ---- origin ----
@@ -129,7 +140,7 @@ def test_origin_rejected(bad):
 
 def test_trust_env_disabled():
     s = _Session({})
-    AssetFareClient(session=s)
+    af(session=s)
     assert s.trust_env is False
 
 
@@ -171,7 +182,7 @@ def test_status_boundary_fail():
 # ---- quote wiring + 72 routes ----
 def test_quote_exact_body_and_bounded_return():
     s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
-    out = AssetFareClient(session=s).get_quote("solana", "usdc", "base", "eth", 250)
+    out = af(session=s).get_quote("solana", "usdc", "base", "eth", 250)
     body = s.calls[0]["json"]
     assert s.calls[0]["method"] == "POST"
     assert body == {
@@ -190,7 +201,7 @@ def test_all_72_routes_and_9_identity():
     for fc, ft in ENDPOINTS:
         for tc, tt in ENDPOINTS:
             s = _Session({"/v2/quote": valid_quote(fc, ft, tc, tt, 100)})
-            c = AssetFareClient(session=s)
+            c = af(session=s)
             if (fc, ft) == (tc, tt):
                 with pytest.raises(AssetFareError):
                     c.get_quote(fc, ft, tc, tt, 100)
@@ -321,7 +332,7 @@ def test_iter_content_error_sanitized():
     s = _Session({})
     s.routes = {"/v2/capabilities": _Boom(), "/v2/status": valid_status()}
     with pytest.raises(AssetFareError) as ei:
-        AssetFareClient(session=s).get_capabilities()
+        af(session=s).get_capabilities()
     assert "SECRETMARKER" not in str(ei.value)
     assert ei.value.__cause__ is None
 
@@ -339,3 +350,56 @@ def test_quote_execution_first_unsigned_flag_rejected(mut):
     mut(q)
     with pytest.raises(AssetFareError):
         client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
+
+
+# ---- as_of RFC3339 freshness (clock injected) ----
+@pytest.mark.parametrize(
+    "as_of",
+    [
+        "2026-09-17T00:00:00",  # naive (no timezone) -> rejected
+        "2020-01-01T00:00:00Z",  # expired (as_of + ttl < now)
+        "2026-09-17T01:00:00Z",  # excessive future skew (> now + 5 min)
+        "2026-13-40T99:99:99Z",  # malformed
+        "2026-09-17",  # date only, no time
+    ],
+)
+def test_as_of_rejected(as_of):
+    q = valid_quote("solana", "USDC", "base", "ETH", 250)
+    q["as_of"] = as_of
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
+
+
+def test_as_of_numeric_offset_accepted():
+    q = valid_quote("solana", "USDC", "base", "ETH", 250)
+    q["as_of"] = "2026-09-17T00:00:05+00:00"  # tz-aware offset form, fresh
+    out = client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
+    assert out["as_of"] == "2026-09-17T00:00:05+00:00"
+
+
+# ---- total monotonic deadline (fake clock) ----
+class _Clock:
+    def __init__(self, values):
+        self._values = list(values)
+
+    def __call__(self):
+        return self._values.pop(0) if len(self._values) > 1 else self._values[0]
+
+
+def test_total_monotonic_deadline_rejects_slow_stream():
+    # monotonic: #1 deadline base=0 (=> deadline 45), #2 remaining check=0 (ok),
+    # #3 inside the iter_content loop=100 (> deadline 45) => rejected.
+    clock = _Clock([0.0, 0.0, 100.0])
+    s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
+    c = af(session=s, monotonic=clock)
+    with pytest.raises(AssetFareError):
+        c.get_quote("solana", "USDC", "base", "ETH", 250)
+
+
+def test_pre_request_deadline_exhausted_rejected():
+    # remaining <= 0 before the request is even made.
+    clock = _Clock([0.0, 100.0])
+    s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
+    c = af(session=s, monotonic=clock)
+    with pytest.raises(AssetFareError):
+        c.get_quote("solana", "USDC", "base", "ETH", 250)
