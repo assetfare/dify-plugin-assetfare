@@ -21,11 +21,16 @@ from urllib.parse import urlsplit
 import requests
 
 _ALLOWED_ORIGIN = "https://api.assetfare.dev"
-# The requests socket timeout is per connect/read inactivity; on top of it we
-# enforce a real total monotonic deadline across the whole call (below), so a
-# slow drip stream cannot make an agent hang past the budget.
+# `_SOCKET_TIMEOUT_S` is the requests connect/read *inactivity* cap: a single
+# connect or read cannot block longer than this. On top of it we track a
+# monotonic *stale budget* per call and reject once the elapsed time has already
+# overrun it -- checked before the request and after each received chunk (i.e. at
+# chunk boundaries, not mid-read). This is NOT a hard absolute cancel: between
+# stale checks a read can still extend up to the socket-inactivity window past
+# the budget, and no thread/gevent forced cancellation is used (intentionally).
+# The real hard wall is the Dify serverless runtime's outer execution limit.
 _SOCKET_TIMEOUT_S = 45.0
-_TOTAL_DEADLINE_S = 45.0
+_STALE_BUDGET_S = 45.0
 _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 86_400
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
@@ -92,14 +97,18 @@ class AssetFareClient:
         self.base_url = _validate_origin(base_url)
         self._session = session or requests.Session()
         self._session.trust_env = False
-        # Injectable clocks (tests supply fakes). `monotonic` drives the total
-        # deadline; `utcnow` (timezone-aware UTC) drives the quote freshness check.
+        # Injectable clocks (tests supply fakes). `monotonic` drives the stale
+        # budget; `utcnow` (timezone-aware UTC) drives the quote freshness check.
         self._monotonic = monotonic or time.monotonic
         self._utcnow = utcnow or (lambda: datetime.now(UTC))
 
     # ---- transport ----
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None, deadline: float) -> dict[str, Any]:
-        remaining = deadline - self._monotonic()
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None, budget_deadline: float
+    ) -> dict[str, Any]:
+        # Reject if the stale budget is already exhausted before we start; cap the
+        # per-socket inactivity timeout at whatever budget remains.
+        remaining = budget_deadline - self._monotonic()
         if remaining <= 0:
             _fail("assetfare_upstream_unavailable")
         timeout = min(_SOCKET_TIMEOUT_S, remaining)
@@ -135,9 +144,10 @@ class AssetFareClient:
                 chunks: list[bytes] = []
                 total = 0
                 for chunk in resp.iter_content(chunk_size=65536):
-                    # Enforce the total monotonic budget even under a slow drip
-                    # stream whose individual chunks each beat the socket timeout.
-                    if self._monotonic() >= deadline:
+                    # Stale-budget check at each chunk boundary: reject a stream
+                    # that has already overrun its budget once a (possibly delayed)
+                    # chunk is received. Not a mid-read absolute cancel.
+                    if self._monotonic() >= budget_deadline:
                         _fail("assetfare_upstream_unavailable")
                     if not chunk:
                         continue
@@ -194,9 +204,9 @@ class AssetFareClient:
 
     # ---- read-only capabilities ----
     def get_capabilities(self) -> dict[str, Any]:
-        deadline = self._monotonic() + _TOTAL_DEADLINE_S
-        caps = self._request("GET", "/v2/capabilities", None, deadline)
-        status = self._request("GET", "/v2/status", None, deadline)
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        caps = self._request("GET", "/v2/capabilities", None, budget_deadline)
+        status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
         if (
@@ -242,7 +252,7 @@ class AssetFareClient:
         to_u = self._endpoint(to_chain, to_token, "destination")
         if (from_chain, from_u) == (to_chain, to_u):
             raise AssetFareError("assetfare_identity_route_rejected")
-        deadline = self._monotonic() + _TOTAL_DEADLINE_S
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
         data = self._request(
             "POST",
             "/v2/quote",
@@ -253,7 +263,7 @@ class AssetFareClient:
                 "to_token": to_u,
                 "amount_usd": amount,
             },
-            deadline,
+            budget_deadline,
         )
         intent = self._obj(data, "intent")
         offer = self._obj(data, "offer")

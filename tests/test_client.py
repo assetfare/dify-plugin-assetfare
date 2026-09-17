@@ -377,7 +377,7 @@ def test_as_of_numeric_offset_accepted():
     assert out["as_of"] == "2026-09-17T00:00:05+00:00"
 
 
-# ---- total monotonic deadline (fake clock) ----
+# ---- stale-budget check (fake clock) ----
 class _Clock:
     def __init__(self, values):
         self._values = list(values)
@@ -386,9 +386,12 @@ class _Clock:
         return self._values.pop(0) if len(self._values) > 1 else self._values[0]
 
 
-def test_total_monotonic_deadline_rejects_slow_stream():
-    # monotonic: #1 deadline base=0 (=> deadline 45), #2 remaining check=0 (ok),
-    # #3 inside the iter_content loop=100 (> deadline 45) => rejected.
+def test_stale_budget_rejects_delayed_chunk():
+    # A (delayed) chunk is received only after the stale budget has already
+    # elapsed, so the chunk-boundary check rejects it. This is NOT an absolute
+    # mid-read cancel -- it fires once the delayed chunk actually arrives.
+    # monotonic: #1 budget base=0 (=> deadline 45), #2 remaining check=0 (ok),
+    # #3 at the chunk boundary=100 (> 45) => stale reject.
     clock = _Clock([0.0, 0.0, 100.0])
     s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
     c = af(session=s, monotonic=clock)
@@ -396,8 +399,8 @@ def test_total_monotonic_deadline_rejects_slow_stream():
         c.get_quote("solana", "USDC", "base", "ETH", 250)
 
 
-def test_pre_request_deadline_exhausted_rejected():
-    # remaining <= 0 before the request is even made.
+def test_stale_budget_pre_request_rejected():
+    # Stale budget already exhausted before the request is even made.
     clock = _Clock([0.0, 100.0])
     s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
     c = af(session=s, monotonic=clock)
