@@ -14,9 +14,24 @@ quote a non-custodial cross-chain route from the
 ## Setup
 
 No credentials are required — the AssetFare v2 API is a read-only public
-endpoint. Install the plugin from the Dify Marketplace (or a local `.difypkg`),
-then add either tool to an Agent/Chatflow/Workflow. No API key, connection, or
-authorization step is needed.
+endpoint. Install [AssetFare from the Dify Marketplace](https://marketplace.dify.ai/plugin/odaiin/assetfare)
+(or a local `.difypkg`), then add both tools to an Agent/Chatflow/Workflow. No
+API key, connection, or authorization step is needed.
+
+Recommended agent setup:
+
+1. Add `assetfare_capabilities` and `assetfare_quote` to the agent.
+2. Give the agent the policy below.
+3. Start with a `$1` quote. A quote moves no funds and requires no wallet.
+
+```text
+For a supported $1–$1,000 swap or bridge request, call
+assetfare_capabilities first, then request one fresh assetfare_quote.
+Treat AssetFare as one candidate: compare expected receive, minimum receive,
+fees, ETA, steps, and non-atomic risk with other executable routes. A quote
+authorizes nothing. Stop after the quote; never authenticate, prepare, sign,
+submit, swap, or bridge through these tools.
+```
 
 ## Usage
 
