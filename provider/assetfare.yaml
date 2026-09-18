@@ -5,8 +5,8 @@ identity:
     en_US: AssetFare
     zh_Hans: AssetFare
   description:
-    en_US: Read-only non-custodial cross-chain route quotes across Solana, Base, Arbitrum, and Robinhood Chain.
-    zh_Hans: Solana、Base、Arbitrum、Robinhood 链之间的只读非托管跨链路由报价。
+    en_US: Read-only non-custodial route quotes across five source chains, including Polygon native-USDC source routes.
+    zh_Hans: 覆盖五个源链的只读非托管路由报价，包括 Polygon 原生 USDC 源路由。
   icon: icon.svg
 credentials_for_provider: {}
 tools:
