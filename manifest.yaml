@@ -1,4 +1,4 @@
-version: 0.0.1
+version: 0.0.2
 type: plugin
 author: odaiin
 name: assetfare
@@ -7,8 +7,8 @@ label:
   zh_Hans: AssetFare
 created_at: "2026-09-17T00:00:00Z"
 description:
-  en_US: Read-only non-custodial cross-chain route quotes for AI agents across Solana, Base, Arbitrum, and Robinhood Chain. No wallet, signing, or submission.
-  zh_Hans: 面向 AI 代理的只读非托管跨链路由报价，覆盖 Solana、Base、Arbitrum、Robinhood 链。无钱包、签名或提交。
+  en_US: Read-only non-custodial route quotes across five source chains, including Polygon native-USDC source routes. No wallet, signing, or submission.
+  zh_Hans: 覆盖五个源链的只读非托管路由报价，包括 Polygon 原生 USDC 源路由。无钱包、签名或提交。
 icon: icon.svg
 repo: https://github.com/odaiin/dify-plugin-assetfare
 contact: support@assetfare.dev
@@ -25,7 +25,7 @@ plugins:
   tools:
     - provider/assetfare.yaml
 meta:
-  version: 0.0.1
+  version: 0.0.2
   minimum_dify_version: 1.4.0
   arch:
     - amd64

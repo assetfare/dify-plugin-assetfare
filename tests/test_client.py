@@ -28,6 +28,7 @@ ENDPOINTS = [
     ("arbitrum", "USDC"),
     ("robinhood", "ETH"),
     ("robinhood", "USDG"),
+    ("polygon", "USDC"),
 ]
 
 
@@ -35,11 +36,11 @@ def valid_caps():
     return {
         "status": "capped_public_agent_release",
         "public_api_enabled": True,
-        "directed_conversion_routes": 72,
-        "unsigned_route_plans_ready": 72,
+        "directed_conversion_routes": 74,
+        "unsigned_route_plans_ready": 74,
         "server_signing": False,
         "server_submission": False,
-        "chains": ["arbitrum", "base", "robinhood", "solana"],
+        "chains": ["arbitrum", "base", "polygon", "robinhood", "solana"],
         "asset_endpoints": [{"chain": c, "token": t} for c, t in ENDPOINTS],
     }
 
@@ -147,8 +148,8 @@ def test_trust_env_disabled():
 # ---- capabilities ----
 def test_capabilities_ok():
     caps = client({"/v2/capabilities": valid_caps(), "/v2/status": valid_status()}).get_capabilities()
-    assert caps["directed_conversion_routes"] == 72
-    assert len(caps["asset_endpoints"]) == 9
+    assert caps["directed_conversion_routes"] == 74
+    assert len(caps["asset_endpoints"]) == 10
     assert caps["server_signs_or_submits"] is False
 
 
@@ -179,7 +180,7 @@ def test_status_boundary_fail():
         ).get_capabilities()
 
 
-# ---- quote wiring + 72 routes ----
+# ---- quote wiring + 74 routes ----
 def test_quote_exact_body_and_bounded_return():
     s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
     out = af(session=s).get_quote("solana", "usdc", "base", "eth", 250)
@@ -196,20 +197,28 @@ def test_quote_exact_body_and_bounded_return():
     assert "fee_collection_steps" not in out
 
 
-def test_all_72_routes_and_9_identity():
+def test_all_74_routes_and_9_identity():
     ok = identity = 0
     for fc, ft in ENDPOINTS:
-        for tc, tt in ENDPOINTS:
+        for tc, tt in [endpoint for endpoint in ENDPOINTS if endpoint[0] != "polygon"]:
             s = _Session({"/v2/quote": valid_quote(fc, ft, tc, tt, 100)})
             c = af(session=s)
             if (fc, ft) == (tc, tt):
                 with pytest.raises(AssetFareError):
                     c.get_quote(fc, ft, tc, tt, 100)
                 identity += 1
-            else:
+            elif fc != "polygon" or (ft == "USDC" and tc in {"base", "arbitrum"} and tt == "USDC"):
                 c.get_quote(fc, ft, tc, tt, 100)
                 ok += 1
-    assert ok == 72 and identity == 9
+            else:
+                with pytest.raises(AssetFareError):
+                    c.get_quote(fc, ft, tc, tt, 100)
+    assert ok == 74 and identity == 9
+
+
+def test_polygon_destination_rejected():
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": valid_quote("base", "USDC", "polygon", "USDC", 10)}).get_quote("base", "USDC", "polygon", "USDC", 10)
 
 
 @pytest.mark.parametrize("amt", [0.5, 0, 1500, True, "250", float("nan"), float("inf")])

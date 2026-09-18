@@ -20,7 +20,7 @@ parameters:
     human_description:
       en_US: The source chain to move value from.
       zh_Hans: 转出价值的源链。
-    llm_description: source chain, one of solana, base, arbitrum, robinhood
+    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon; Polygon supports native USDC source-only to Base or Arbitrum USDC
     options:
       - value: solana
         label: {en_US: solana, zh_Hans: solana}
@@ -30,6 +30,8 @@ parameters:
         label: {en_US: arbitrum, zh_Hans: arbitrum}
       - value: robinhood
         label: {en_US: robinhood, zh_Hans: robinhood}
+      - value: polygon
+        label: {en_US: polygon, zh_Hans: polygon}
   - name: from_token
     type: select
     required: true

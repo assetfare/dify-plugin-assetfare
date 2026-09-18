@@ -35,7 +35,7 @@ _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 86_400
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
-_CHAINS = ("arbitrum", "base", "robinhood", "solana")
+_CHAINS = ("arbitrum", "base", "polygon", "robinhood", "solana")
 _ENDPOINTS = frozenset(
     {
         ("solana", "SOL"),
@@ -47,9 +47,10 @@ _ENDPOINTS = frozenset(
         ("arbitrum", "USDC"),
         ("robinhood", "ETH"),
         ("robinhood", "USDG"),
+        ("polygon", "USDC"),
     }
 )
-_EXPECTED_ROUTES = 72
+_EXPECTED_ROUTES = 74
 _MIN_USD = 1.0
 _MAX_USD = 1000.0
 
@@ -252,6 +253,10 @@ class AssetFareClient:
         to_u = self._endpoint(to_chain, to_token, "destination")
         if (from_chain, from_u) == (to_chain, to_u):
             raise AssetFareError("assetfare_identity_route_rejected")
+        if to_chain == "polygon":
+            raise AssetFareError("assetfare_destination_endpoint_invalid")
+        if from_chain == "polygon" and not (from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"):
+            raise AssetFareError("assetfare_source_endpoint_invalid")
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
         data = self._request(
             "POST",
