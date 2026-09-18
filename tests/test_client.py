@@ -42,6 +42,8 @@ def valid_caps():
         "server_submission": False,
         "chains": ["arbitrum", "base", "polygon", "robinhood", "solana"],
         "asset_endpoints": [{"chain": c, "token": t} for c, t in ENDPOINTS],
+        "source_only_asset_endpoints": [{"chain": "polygon", "token": "USDC"}],
+        "source_only_routes": ["polygon:USDC->base:USDC", "polygon:USDC->arbitrum:USDC"],
     }
 
 
@@ -164,6 +166,7 @@ def test_capabilities_ok():
         lambda c: c.update(chains=["arbitrum", "base", "solana"]),
         lambda c: c.update(chains=["arbitrum", "base", "solana", "solana"]),  # duplicate substitution
         lambda c: c["asset_endpoints"].pop(),
+        lambda c: c.update(source_only_routes=["polygon:USDC->base:ETH", "polygon:USDC->arbitrum:USDC"]),
     ],
 )
 def test_capabilities_boundary_fail(mut):

@@ -232,12 +232,20 @@ class AssetFareClient:
             got.add((ep["chain"], str(ep["token"]).upper()))
         if len(got) != len(_ENDPOINTS) or got != _ENDPOINTS:
             _fail("assetfare_safety_boundary_failed")
+        if caps.get("source_only_asset_endpoints") != [{"chain": "polygon", "token": "USDC"}]:
+            _fail("assetfare_safety_boundary_failed")
+        expected_source_only = {"polygon:USDC->base:USDC", "polygon:USDC->arbitrum:USDC"}
+        source_only = caps.get("source_only_routes")
+        if not isinstance(source_only, list) or len(source_only) != 2 or set(source_only) != expected_source_only:
+            _fail("assetfare_safety_boundary_failed")
         return {
             "status": caps["status"],
             "chains": sorted(_CHAINS),
             "asset_endpoints": [f"{c}:{t}" for (c, t) in sorted(_ENDPOINTS)],
             "directed_conversion_routes": _EXPECTED_ROUTES,
             "unsigned_route_plans_ready": _EXPECTED_ROUTES,
+            "source_only_asset_endpoints": ["polygon:USDC"],
+            "source_only_routes": sorted(expected_source_only),
             "amount_usd_min": _MIN_USD,
             "amount_usd_max": _MAX_USD,
             "quote_only": True,
