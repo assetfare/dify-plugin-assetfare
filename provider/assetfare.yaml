@@ -5,13 +5,20 @@ identity:
     en_US: AssetFare
     zh_Hans: AssetFare
   description:
-    en_US: Read-only non-custodial route quotes across six source chains, including Polygon (1bp) and Optimism (0bp) native-USDC source-only routes to Base/Arbitrum.
-    zh_Hans: 覆盖六个源链的只读非托管路由报价，包括 Polygon（1bp）与 Optimism（0bp）原生 USDC 仅作源、通往 Base/Arbitrum 的路由。
+    en_US: Non-custodial cross-chain route quotes across six source chains plus caller-approved, unsigned prepare and session-lifecycle tools. AssetFare never signs, submits, or takes a private key.
+    zh_Hans: 覆盖六个源链的非托管跨链路由报价，以及调用方批准的未签名 prepare 与会话生命周期工具。AssetFare 绝不签名、提交或接收私钥。
   icon: icon.svg
 credentials_for_provider: {}
 tools:
   - tools/assetfare_capabilities.yaml
   - tools/assetfare_quote.yaml
+  - tools/assetfare_prepare.yaml
+  - tools/assetfare_new_session_capability.yaml
+  - tools/assetfare_session_create.yaml
+  - tools/assetfare_session_get.yaml
+  - tools/assetfare_observe_source.yaml
+  - tools/assetfare_observe_output.yaml
+  - tools/assetfare_refresh_action.yaml
 extra:
   python:
     source: provider/assetfare.py

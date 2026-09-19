@@ -1,0 +1,36 @@
+identity:
+  author: odaiin
+  name: assetfare_refresh_action
+  label:
+    en_US: Refresh an AssetFare session action
+    zh_Hans: 刷新 AssetFare 会话操作
+description:
+  human:
+    en_US: Replace an expired, unsubmitted session action with a fresh quote-bound unsigned action. Requires the caller's session token. Never signs.
+    zh_Hans: 用全新的、绑定报价的未签名操作替换已过期且未提交的会话操作。需要调用方会话令牌。绝不签名。
+  llm: Replace an expired, unsubmitted v2 session action with a fresh quote-bound unsigned action. Requires the caller's session token, the session_id, and an idempotency_key. Never signs or submits.
+parameters:
+  - name: session_token
+    type: secret-input
+    required: true
+    form: llm
+    label: {en_US: Session capability token, zh_Hans: 会话能力令牌}
+    human_description: {en_US: The caller-generated session token. Sensitive; not a private key., zh_Hans: 调用方生成的会话令牌。敏感；非私钥。}
+    llm_description: the caller's session capability token; sensitive bearer value, never a private key
+  - name: session_id
+    type: string
+    required: true
+    form: llm
+    label: {en_US: Session ID, zh_Hans: 会话 ID}
+    human_description: {en_US: The session_id returned by session_create., zh_Hans: session_create 返回的 session_id。}
+    llm_description: the session_id returned by assetfare_session_create
+  - name: idempotency_key
+    type: string
+    required: true
+    form: llm
+    label: {en_US: Idempotency key, zh_Hans: 幂等键}
+    human_description: {en_US: A stable key (8-128 chars) so a retry is idempotent., zh_Hans: 稳定的键（8-128 字符），使重试幂等。}
+    llm_description: a stable idempotency key (8-128 chars) for this refresh
+extra:
+  python:
+    source: tools/assetfare_refresh_action.py

@@ -20,9 +20,9 @@ class AssetFareQuoteTool(Tool):
         except AssetFareError as exc:
             yield self.create_text_message(f"AssetFare quote unavailable ({exc}).")
             return
-        # The client already surfaces the upstream caller_action_plan_handoff
-        # (validated against the caller-operated REST /v2/prepare contract, with a
-        # canonical fallback only when upstream omits it). The tool does not
-        # synthesize a static copy that could drift from the contract, and it never
-        # calls prepare, receives a private key, signs, or submits.
+        # The client surfaces the upstream caller_action_plan_handoff FAIL-CLOSED
+        # (no local fallback): a missing/malformed handoff is rejected, executable
+        # routes carry the dual-option handoff (prepare + full session lifecycle), and
+        # source-only routes carry available:false with no prepare url. This tool never
+        # calls prepare/session, receives a private key, signs, or submits.
         yield self.create_json_message(dict(result))

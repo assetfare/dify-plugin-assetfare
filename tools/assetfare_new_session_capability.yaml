@@ -1,0 +1,15 @@
+identity:
+  author: odaiin
+  name: assetfare_new_session_capability
+  label:
+    en_US: New AssetFare session capability token
+    zh_Hans: 生成 AssetFare 会话能力令牌
+description:
+  human:
+    en_US: Generate one caller-owned high-entropy session capability token locally. Makes no network call. Sensitive bearer value, not a private key.
+    zh_Hans: 在本地生成一个由调用方持有的高熵会话能力令牌。不发起任何网络请求。敏感凭据，非私钥。
+  llm: Locally generate one caller-owned session capability token (>=256-bit CSPRNG, url-safe, 43-128 chars) with ZERO network calls. Store it as a SENSITIVE bearer capability (never a private key, never logged) and pass it as session_token to assetfare_session_create and to every session get/observe/refresh call. Retrying a lost session_create with the same token and idempotency_key recovers the same session. Do not auto-chain this from a quote.
+parameters: []
+extra:
+  python:
+    source: tools/assetfare_new_session_capability.py

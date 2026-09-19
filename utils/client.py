@@ -1,9 +1,17 @@
-"""AssetFare read-only v2 client (pure; no Dify runtime dependency).
+"""AssetFare non-custodial v2 client (pure; no Dify runtime dependency).
 
-Quote-only. It never authenticates a wallet, opens a session, prepares an
-unsigned action, signs, or submits, and it validates every response against the
-live AssetFare v2 contract, failing closed on anything that claims the server
-will sign or submit. Kept free of the Dify SDK so it can be unit-tested offline.
+Read-only quote/capabilities discovery PLUS the caller-approved, non-custodial
+v2 action surface: a one-shot ``POST /v2/prepare`` and the full ``POST /v2/session``
+receipt-driven lifecycle (get / observe-source / observe-output / refresh-action).
+
+This client NEVER signs, NEVER submits to a chain, NEVER receives a private key or
+seed, and NEVER auto-calls prepare/session from a quote. Every response is validated
+against the live AssetFare v2 contract and fails closed on anything that claims the
+server will sign or submit, or that omits/deviates from the caller_action_plan_handoff
+contract. The caller-generated session capability token is a SENSITIVE bearer value
+(sent only in the ``X-AssetFare-Session-Token`` header, never logged), not a private key.
+
+Kept free of the Dify SDK so it can be unit-tested offline.
 """
 
 from __future__ import annotations
@@ -11,6 +19,8 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import re
+import secrets
 import time
 import uuid
 from collections.abc import Callable
@@ -36,9 +46,13 @@ _MAX_TTL_SECONDS = 86_400
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
 _CHAINS = ("arbitrum", "base", "optimism", "polygon", "robinhood", "solana")
+# Source chains that MAY be used in a quote/prepare intent. Destinations exclude
+# the source-only chains.
+_DESTINATION_CHAINS = frozenset({"solana", "base", "arbitrum", "robinhood"})
 # Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
-# are never a destination. polygon collects 1bp on its audited executor step;
-# optimism collects 0bp. Both are symmetric in routing (USDC -> base/arbitrum USDC).
+# are never a destination, and they are NOT execution-ready this phase (future
+# Phase B): their quotes carry execution.supported=false and a blocked handoff,
+# and prepare/session are fail-closed rejected before any network call.
 _SOURCE_ONLY_CHAINS = frozenset({"optimism", "polygon"})
 _ENDPOINTS = frozenset(
     {
@@ -64,17 +78,21 @@ _SOURCE_ONLY_ROUTES = frozenset(
         "optimism:USDC->arbitrum:USDC",
     }
 )
-_EXPECTED_ROUTES = 76
+_EXPECTED_ROUTES = 76  # directed quote-discovery routes (6-chain surface)
+_EXECUTION_READY_ROUTES = 72  # four-chain routes that expose an executable action plan
+_PHASE_B_BLOCKED_ROUTES = 4  # source-only routes (polygon/optimism) blocked this phase
 _MIN_USD = 1.0
 _MAX_USD = 1000.0
 
-# Caller-operated REST /v2/prepare handoff contract. The client SURFACES the
-# upstream `caller_action_plan_handoff` from the /v2/quote response (validated
-# below); this canonical shape is used only as a fallback when upstream omits it.
-# This plugin never calls /v2/prepare, receives no private key, and never signs
-# or submits -- the handoff is guidance the caller executes with its own wallet.
+# ---- Caller-operated non-custodial v2 action contract (fixed origin) --------
 _PREPARE_URL = "https://api.assetfare.dev/v2/prepare"
+_SESSION_URL = "https://api.assetfare.dev/v2/session"
+_EXECUTION_NOT_READY = "execution_not_ready_phase_b"
+_FEE_COLLECTION_CONST = "only_on_eligible_successful_executor_step"
+_SESSION_TOKEN_HEADER = "X-AssetFare-Session-Token"
+# EXACT 8-field request contract (caller_approved first). Any deviation fails closed.
 _HANDOFF_REQUEST_FIELDS = [
+    "caller_approved",
     "from_chain",
     "from_token",
     "to_chain",
@@ -83,22 +101,57 @@ _HANDOFF_REQUEST_FIELDS = [
     "wallets",
     "event_signer_public",
 ]
-_CALLER_HANDOFF_FALLBACK = {
-    "kind": "caller_operated_rest_prepare",
-    "url": _PREPARE_URL,
-    "method": "POST",
-    "requires_explicit_caller_approval": True,
-    "requires_public_wallet_addresses": True,
-    "request_fields": list(_HANDOFF_REQUEST_FIELDS),
-    "assetfare_server_signing": False,
-    "assetfare_server_submission": False,
-    "caller_must_verify_sign_and_submit": True,
-    "note": (
-        "Guidance only: this Dify tool does not call prepare or receive a private key. "
-        "On explicit caller approval the caller POSTs public wallet addresses to /v2/prepare, "
-        "then verifies, signs, and submits with its own wallet."
-    ),
-}
+_HANDOFF_ALLOWED_KEYS = frozenset(
+    {
+        "kind",
+        "url",
+        "method",
+        "requires_explicit_caller_approval",
+        "requires_public_wallet_addresses",
+        "request_fields",
+        "assetfare_server_signing",
+        "assetfare_server_submission",
+        "caller_must_verify_sign_and_submit",
+        "requires_fresh_requote",
+        "automatic_prepare_call_forbidden",
+        "options",
+        "note",
+        "available",
+        "blocker",
+    }
+)
+
+# Public wallet addresses only. Never a private key, seed, or signed transaction.
+_EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_SOL_ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+# Caller-generated session capability token: >=256-bit CSPRNG, url-safe, 43-128 chars.
+_SESSION_TOKEN = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
+_IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_TX_HASH = re.compile(r"^[0-9A-Za-z:_-]{16,128}$")
+# Key names that would carry signing/secret material. Any of these anywhere in a
+# caller-supplied intent is rejected before a network call.
+_FORBIDDEN_SECRET_KEYS = frozenset(
+    {
+        "private_key",
+        "privatekey",
+        "privkey",
+        "secret_key",
+        "secretkey",
+        "seed",
+        "seed_phrase",
+        "mnemonic",
+        "keypair",
+        "secret",
+        "signature",
+        "signed_transaction",
+        "signed_tx",
+        "raw_transaction",
+        "signed",
+        "password",
+        "passphrase",
+    }
+)
 
 
 class AssetFareError(RuntimeError):
@@ -133,6 +186,86 @@ def _validate_origin(base_url: str) -> str:
     return _ALLOWED_ORIGIN
 
 
+def _reject_secret_material(value: Any) -> None:
+    """Deep-scan a caller intent and reject any private-key / seed / signed material.
+
+    Bounded (node count and depth) so a hostile/huge input cannot hang the scan.
+    """
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    seen = 0
+    while stack:
+        node, depth = stack.pop()
+        seen += 1
+        if seen > 512 or depth > 12:
+            _fail("assetfare_secret_material_rejected")
+        if isinstance(node, dict):
+            for key in node:
+                if str(key).lower() in _FORBIDDEN_SECRET_KEYS:
+                    _fail("assetfare_secret_material_rejected")
+            for child in node.values():
+                stack.append((child, depth + 1))
+        elif isinstance(node, (list, tuple)):
+            for child in node:
+                stack.append((child, depth + 1))
+
+
+def _reject_signing_claims(value: Any) -> None:
+    """Fail closed if any nested object claims server_signing/server_submission != False."""
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    seen = 0
+    while stack:
+        node, depth = stack.pop()
+        seen += 1
+        if seen > 512 or depth > 12:
+            _fail("assetfare_safety_boundary_failed")
+        if isinstance(node, dict):
+            for key in ("server_signing", "server_submission"):
+                if key in node and node[key] is not False:
+                    _fail("assetfare_safety_boundary_failed")
+            for child in node.values():
+                stack.append((child, depth + 1))
+        elif isinstance(node, (list, tuple)):
+            for child in node:
+                stack.append((child, depth + 1))
+
+
+def _is_public_address(value: Any) -> bool:
+    return isinstance(value, str) and bool(_EVM_ADDRESS.match(value) or _SOL_ADDRESS.match(value))
+
+
+def new_session_capability() -> dict[str, Any]:
+    """Generate ONE caller-owned session capability token, purely locally.
+
+    Makes NO network call. Returns a >=256-bit CSPRNG url-safe token (43-128 chars)
+    marked SENSITIVE. It is a bearer capability, NOT a private key, and cannot move
+    funds. The caller stores it and passes it to session_create and every
+    session read/observe/refresh. Because the CALLER (not the server) owns the token,
+    a lost session_create response can be retried with the same token + idempotency
+    key to recover the same session. Never log, telemetry, or persist it in plaintext.
+    """
+    token = secrets.token_urlsafe(32)  # 32 bytes = 256 bits -> 43 url-safe chars
+    if not _SESSION_TOKEN.match(token):  # pragma: no cover - token_urlsafe(32) always 43 chars
+        _fail("assetfare_session_token_generation_failed")
+    return {
+        "session_token": token,
+        "token_bits": 256,
+        "token_length": len(token),
+        "sensitivity": "sensitive_capability",
+        "is_private_key": False,
+        "network_calls": 0,
+        "usage": (
+            "Pass this token as session_token to assetfare_session_create and to every "
+            "session get/observe/refresh call. It is sent to AssetFare only in the "
+            "X-AssetFare-Session-Token header; the server stores only its hash and never "
+            "returns it. Treat it like a bearer credential: never log, share, or persist it "
+            "in plaintext. It is NOT a private key and cannot move funds. Retrying a lost "
+            "session_create with the same token + idempotency_key recovers the same session."
+        ),
+        "server_signing": False,
+        "server_submission": False,
+    }
+
+
 class AssetFareClient:
     def __init__(
         self,
@@ -151,7 +284,12 @@ class AssetFareClient:
 
     # ---- transport ----
     def _request(
-        self, method: str, path: str, payload: dict[str, Any] | None, budget_deadline: float
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None,
+        budget_deadline: float,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         # Reject if the stale budget is already exhausted before we start; cap the
         # per-socket inactivity timeout at whatever budget remains.
@@ -159,6 +297,9 @@ class AssetFareClient:
         if remaining <= 0:
             _fail("assetfare_upstream_unavailable")
         timeout = min(_SOCKET_TIMEOUT_S, remaining)
+        headers = {"accept": "application/json", "x-assetfare-channel": "dify"}
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             resp = self._session.request(
                 method,
@@ -166,7 +307,7 @@ class AssetFareClient:
                 json=payload,
                 timeout=timeout,
                 allow_redirects=False,
-                headers={"accept": "application/json", "x-assetfare-channel": "dify"},
+                headers=headers,
                 stream=True,
             )
         except requests.RequestException:
@@ -228,42 +369,128 @@ class AssetFareClient:
             _fail("assetfare_safety_boundary_failed")
 
     @staticmethod
-    def _validate_caller_handoff(node: Any) -> dict[str, Any]:
-        # Surface the upstream caller_action_plan_handoff, failing closed on any
-        # deviation from the caller-operated REST /v2/prepare contract. Anything
-        # claiming the server will sign/submit is a hard safety-boundary failure.
+    def _validate_caller_handoff(node: Any, source_only: bool) -> dict[str, Any]:
+        """FAIL-CLOSED passthrough of the upstream caller_action_plan_handoff.
+
+        There is NO local fallback: a missing / null / array / extra-field /
+        wrong-field / private-key handoff is a real contract regression and is
+        REJECTED. Executable routes must carry the dual-option handoff (POST
+        /v2/prepare + full /v2/session lifecycle). Source-only routes must carry
+        the blocked form: available=false, blocker, and NO prepare url / options.
+        """
         if not isinstance(node, dict):
-            _fail("assetfare_response_invalid")
+            _fail("assetfare_handoff_missing")
         if node.get("kind") != "caller_operated_rest_prepare":
-            _fail("assetfare_response_invalid")
-        if node.get("url") != _PREPARE_URL or node.get("method") != "POST":
-            _fail("assetfare_response_invalid")
-        if node.get("requires_explicit_caller_approval") is not True:
-            _fail("assetfare_response_invalid")
-        if node.get("requires_public_wallet_addresses") is not True:
-            _fail("assetfare_response_invalid")
-        if node.get("caller_must_verify_sign_and_submit") is not True:
-            _fail("assetfare_response_invalid")
-        if node.get("assetfare_server_signing") is not False or node.get("assetfare_server_submission") is not False:
-            _fail("assetfare_safety_boundary_failed")
+            _fail("assetfare_handoff_invalid")
+        if node.get("method") != "POST":
+            _fail("assetfare_handoff_invalid")
         fields = node.get("request_fields")
         if not isinstance(fields, list) or list(fields) != _HANDOFF_REQUEST_FIELDS:
-            _fail("assetfare_response_invalid")
+            _fail("assetfare_handoff_request_fields_invalid")
+        if node.get("requires_explicit_caller_approval") is not True:
+            _fail("assetfare_handoff_invalid")
+        if node.get("requires_public_wallet_addresses") is not True:
+            _fail("assetfare_handoff_invalid")
+        if node.get("assetfare_server_signing") is not False or node.get("assetfare_server_submission") is not False:
+            _fail("assetfare_safety_boundary_failed")
+        if node.get("caller_must_verify_sign_and_submit") is not True:
+            _fail("assetfare_handoff_invalid")
+        if node.get("requires_fresh_requote") is not True:
+            _fail("assetfare_handoff_invalid")
+        if node.get("automatic_prepare_call_forbidden") is not True:
+            _fail("assetfare_handoff_invalid")
         note = node.get("note")
-        if note is not None and not isinstance(note, str):
-            _fail("assetfare_response_invalid")
-        return {
-            "kind": "caller_operated_rest_prepare",
-            "url": _PREPARE_URL,
-            "method": "POST",
-            "requires_explicit_caller_approval": True,
-            "requires_public_wallet_addresses": True,
-            "request_fields": list(_HANDOFF_REQUEST_FIELDS),
-            "assetfare_server_signing": False,
-            "assetfare_server_submission": False,
-            "caller_must_verify_sign_and_submit": True,
-            "note": note if isinstance(note, str) else _CALLER_HANDOFF_FALLBACK["note"],
+        if not isinstance(note, str) or not note:
+            _fail("assetfare_handoff_invalid")
+        for key in node:
+            if key not in _HANDOFF_ALLOWED_KEYS:
+                _fail("assetfare_handoff_extra_field")
+
+        if source_only:
+            if node.get("available") is not False:
+                _fail("assetfare_handoff_invalid")
+            if node.get("blocker") != _EXECUTION_NOT_READY:
+                _fail("assetfare_handoff_invalid")
+            if "url" in node or "options" in node:
+                _fail("assetfare_handoff_source_only_offers_prepare")
+            return dict(node)
+
+        if node.get("available") is not True:
+            _fail("assetfare_handoff_invalid")
+        if node.get("url") != _PREPARE_URL:
+            _fail("assetfare_handoff_invalid")
+        options = node.get("options")
+        if not isinstance(options, list) or len(options) != 2:
+            _fail("assetfare_handoff_options_invalid")
+        prepare_option, session_option = options
+        if (
+            not isinstance(prepare_option, dict)
+            or prepare_option.get("kind") != "one_shot_first_unsigned_bundle"
+            or prepare_option.get("method") != "POST"
+            or prepare_option.get("url") != _PREPARE_URL
+            or prepare_option.get("requires_explicit_caller_approval") is not True
+            or prepare_option.get("requires_public_wallet_addresses") is not True
+            or prepare_option.get("assetfare_never_signs_submits_or_auto_calls") is not True
+        ):
+            _fail("assetfare_handoff_prepare_option_invalid")
+        if (
+            not isinstance(session_option, dict)
+            or session_option.get("kind") != "caller_approved_full_workflow_session"
+            or session_option.get("method") != "POST"
+            or session_option.get("url") != _SESSION_URL
+            or session_option.get("requires_explicit_caller_approval") is not True
+            or session_option.get("requires_public_wallet_addresses") is not True
+            or session_option.get("assetfare_never_signs_submits_or_auto_calls") is not True
+        ):
+            _fail("assetfare_handoff_session_option_invalid")
+        lifecycle = session_option.get("lifecycle_urls")
+        if not isinstance(lifecycle, dict):
+            _fail("assetfare_handoff_session_lifecycle_invalid")
+        expected_lifecycle = {
+            "create": _SESSION_URL,
+            "read": f"{_SESSION_URL}/{{session_id}}",
+            "observe_source": f"{_SESSION_URL}/{{session_id}}/observe-source",
+            "observe_output": f"{_SESSION_URL}/{{session_id}}/observe-output",
+            "refresh_action": f"{_SESSION_URL}/{{session_id}}/refresh-action",
         }
+        for name, url in expected_lifecycle.items():
+            entry = lifecycle.get(name)
+            if not isinstance(entry, dict) or entry.get("url") != url:
+                _fail("assetfare_handoff_session_lifecycle_invalid")
+        return dict(node)
+
+    @staticmethod
+    def _validate_offer_fee(offer: dict[str, Any], step_count: int, source_only: bool) -> None:
+        """Fee EXACTLY {0,1}bp, collected at most once on an eligible successful step.
+
+        fee=1 => fee_collection_steps holds EXACTLY one valid, in-range, non-duplicate
+        index; fee=0 => []. Rejects fee>1 / negative / 8bp, 2-step or 0-step mismatches,
+        out-of-range or duplicate indices. Also validates fee_modeled_bps,
+        fee_collectible_now, and the fee_collection literal.
+        """
+        if offer.get("fee_collection") != _FEE_COLLECTION_CONST:
+            _fail("assetfare_fee_invalid")
+        fee = offer.get("assetfare_fee_bps")
+        if not _int(fee) or fee not in (0, 1):
+            _fail("assetfare_fee_invalid")
+        modeled = offer.get("fee_modeled_bps")
+        if not _int(modeled) or modeled not in (0, 1):
+            _fail("assetfare_fee_invalid")
+        if not isinstance(offer.get("fee_collectible_now"), bool):
+            _fail("assetfare_fee_invalid")
+        if source_only and offer.get("fee_collectible_now") is not False:
+            _fail("assetfare_fee_collectible_while_blocked")
+        steps = offer.get("fee_collection_steps")
+        if not isinstance(steps, list) or not all(_int(s) for s in steps):
+            _fail("assetfare_fee_invalid")
+        if any(s < 0 or s >= step_count for s in steps):
+            _fail("assetfare_fee_step_out_of_range")
+        if len(set(steps)) != len(steps):
+            _fail("assetfare_fee_step_duplicate")
+        if fee == 1 and len(steps) != 1:
+            _fail("assetfare_fee_step_count_mismatch")
+        if fee == 0 and steps != []:
+            _fail("assetfare_fee_step_count_mismatch")
 
     @staticmethod
     def _endpoint(chain: Any, token: Any, field: str) -> str:
@@ -294,9 +521,13 @@ class AssetFareClient:
         status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
+        # Quote discovery spans all 76 routes; execution is ready for 72 (four-chain),
+        # with exactly 4 source-only routes blocked (future Phase B).
         if (
             caps.get("directed_conversion_routes") != _EXPECTED_ROUTES
             or caps.get("unsigned_route_plans_ready") != _EXPECTED_ROUTES
+            or caps.get("execution_ready_routes") != _EXECUTION_READY_ROUTES
+            or caps.get("phase_b_blocked_routes") != _PHASE_B_BLOCKED_ROUTES
         ):
             _fail("assetfare_safety_boundary_failed")
         self._no_sign(caps)
@@ -333,17 +564,27 @@ class AssetFareClient:
             or set(source_only) != _SOURCE_ONLY_ROUTES
         ):
             _fail("assetfare_safety_boundary_failed")
+        blocked = caps.get("blocked_source_only_routes")
+        if (
+            not isinstance(blocked, list)
+            or len(blocked) != len(_SOURCE_ONLY_ROUTES)
+            or set(blocked) != _SOURCE_ONLY_ROUTES
+        ):
+            _fail("assetfare_safety_boundary_failed")
         return {
             "status": caps["status"],
             "chains": sorted(_CHAINS),
             "asset_endpoints": [f"{c}:{t}" for (c, t) in sorted(_ENDPOINTS)],
             "directed_conversion_routes": _EXPECTED_ROUTES,
             "unsigned_route_plans_ready": _EXPECTED_ROUTES,
+            "execution_ready_routes": _EXECUTION_READY_ROUTES,
+            "phase_b_blocked_routes": _PHASE_B_BLOCKED_ROUTES,
             "source_only_asset_endpoints": sorted(f"{c}:{t}" for (c, t) in _SOURCE_ONLY_ENDPOINTS),
             "source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
+            "blocked_source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
             "amount_usd_min": _MIN_USD,
             "amount_usd_max": _MAX_USD,
-            "quote_only": True,
+            "quote_only_discovery": True,
             "server_signs_or_submits": False,
         }
 
@@ -358,9 +599,8 @@ class AssetFareClient:
             raise AssetFareError("assetfare_identity_route_rejected")
         if to_chain in _SOURCE_ONLY_CHAINS:
             raise AssetFareError("assetfare_destination_endpoint_invalid")
-        if from_chain in _SOURCE_ONLY_CHAINS and not (
-            from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"
-        ):
+        source_only = from_chain in _SOURCE_ONLY_CHAINS
+        if source_only and not (from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"):
             raise AssetFareError("assetfare_source_endpoint_invalid")
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
         data = self._request(
@@ -375,6 +615,7 @@ class AssetFareClient:
             },
             budget_deadline,
         )
+        _reject_signing_claims(data)
         intent = self._obj(data, "intent")
         offer = self._obj(data, "offer")
         route = self._obj(data, "route")
@@ -431,7 +672,7 @@ class AssetFareClient:
             _fail("assetfare_response_invalid")
         self._no_sign(route)
 
-        # offer: native and USD ordering expected >= minimum > 0, fee bps, fee steps
+        # offer: native and USD ordering expected >= minimum > 0, output symbol
         exp, mn = offer.get("expected_receive_amount"), offer.get("estimated_min_receive_amount")
         exp_usd, mn_usd = offer.get("expected_receive_usd"), offer.get("estimated_min_receive_usd")
         for v in (exp, mn, exp_usd, mn_usd):
@@ -443,12 +684,10 @@ class AssetFareClient:
             _fail("assetfare_response_invalid")
         if offer.get("output_symbol") != to_u:
             _fail("assetfare_response_invalid")
-        fee = offer.get("assetfare_fee_bps")
-        if not _int(fee) or fee < 0:
-            _fail("assetfare_response_invalid")
-        fee_steps = offer.get("fee_collection_steps")
-        if not isinstance(fee_steps, list) or not all(_int(s) and s >= 0 for s in fee_steps):
-            _fail("assetfare_response_invalid")
+        # Fee EXACTLY {0,1}bp + modeled/collectible + fee_collection literal.
+        self._validate_offer_fee(offer, len(steps), source_only)
+        fee = offer["assetfare_fee_bps"]
+        fee_steps = offer["fee_collection_steps"]
         eta = offer.get("estimated_time_seconds")
         if eta is not None and (not _int(eta) or eta < 0):
             _fail("assetfare_response_invalid")
@@ -460,33 +699,45 @@ class AssetFareClient:
             _fail("assetfare_response_invalid")
         self._no_sign(risk)
 
-        # execution: supported, first-unsigned-action flag (bool), verified-receipts flag true
-        if execution.get("supported") is not True:
-            _fail("assetfare_response_invalid")
+        # execution: discriminated by route class (Phase-B split). Source-only routes
+        # must be NOT execution-ready; executable routes must be ready.
         if not isinstance(execution.get("first_unsigned_action_supported"), bool):
             _fail("assetfare_response_invalid")
         if execution.get("future_actions_require_verified_receipts") is not True:
             _fail("assetfare_response_invalid")
-
-        # Surface the upstream caller_action_plan_handoff; fall back to the
-        # canonical caller-operated REST /v2/prepare shape only if upstream omits
-        # it (so a static local copy cannot silently drift from the contract).
-        handoff_raw = data.get("caller_action_plan_handoff")
-        if handoff_raw is None:
-            caller_action_plan_handoff = dict(_CALLER_HANDOFF_FALLBACK)
+        if source_only:
+            if (
+                execution.get("supported") is not False
+                or execution.get("first_unsigned_action_supported") is not False
+                or execution.get("blocker") != _EXECUTION_NOT_READY
+            ):
+                _fail("assetfare_execution_boundary_failed")
         else:
-            caller_action_plan_handoff = self._validate_caller_handoff(handoff_raw)
+            if execution.get("supported") is not True or execution.get("first_unsigned_action_supported") is not True:
+                _fail("assetfare_execution_boundary_failed")
 
-        # The AssetFare fee is conditional: any advertised bps (0 or 1) is collected
-        # only on an eligible successful executor step. Surface fee_collection_steps
-        # and an explicit note rather than presenting a flat, unconditional fee.
-        fee_steps_out = [int(s) for s in fee_steps]
-        fee_note = (
-            f"AssetFare {fee}bp is collected only on an eligible successful executor step "
-            "(conditional, not an unconditional flat fee)."
-            if fee > 0
-            else "No AssetFare fee is collected on this route (0bp)."
+        # FAIL-CLOSED passthrough of the upstream caller_action_plan_handoff. No
+        # local fallback: a missing/malformed handoff is a real contract regression.
+        caller_action_plan_handoff = self._validate_caller_handoff(
+            data.get("caller_action_plan_handoff"), source_only
         )
+
+        # The AssetFare fee is conditional and, for source-only routes, not collectible
+        # this phase. Surface fee_collection_steps and an explicit note rather than a flat
+        # unconditional fee.
+        fee_steps_out = [int(s) for s in fee_steps]
+        if source_only:
+            fee_note = (
+                f"AssetFare models {fee}bp for this source-only route, but it is NOT collectible now "
+                "(execution_not_ready_phase_b); no prepare/session action is offered."
+            )
+        elif fee > 0:
+            fee_note = (
+                f"AssetFare {fee}bp is collected only on an eligible successful executor step "
+                "(conditional, not an unconditional flat fee)."
+            )
+        else:
+            fee_note = "No AssetFare fee is collected on this route (0bp)."
 
         return {
             "from": expected_from,
@@ -498,15 +749,274 @@ class AssetFareClient:
             "expected_receive_usd": float(exp_usd),
             "estimated_min_receive_usd": float(mn_usd),
             "assetfare_fee_bps": fee,
+            "fee_modeled_bps": int(offer["fee_modeled_bps"]),
+            "fee_collectible_now": bool(offer["fee_collectible_now"]),
             "assetfare_fee_conditional": fee > 0,
             "fee_collection_steps": fee_steps_out,
+            "fee_collection": _FEE_COLLECTION_CONST,
             "assetfare_fee_note": fee_note,
             "estimated_time_seconds": eta if _int(eta) else None,
             "non_atomic": risk["non_atomic"],
             "quote_id": data["quote_id"],
             "as_of": as_of,
             "ttl_seconds": ttl,
-            "execution_supported": True,
+            "source_only": source_only,
+            "execution_supported": not source_only,
+            "execution_blocker": _EXECUTION_NOT_READY if source_only else None,
             "server_signs_or_submits": False,
             "caller_action_plan_handoff": caller_action_plan_handoff,
         }
+
+    # ---- caller-approved action intent helpers ----
+    def _action_intent(
+        self,
+        caller_approved: Any,
+        from_chain: str,
+        from_token: str,
+        to_chain: str,
+        to_token: str,
+        amount_usd: Any,
+        wallets: Any,
+        event_signer_public: Any,
+    ) -> dict[str, Any]:
+        """Validate a caller-approved prepare/session intent BEFORE any network call.
+
+        Enforces the literal caller_approved gate, the route endpoints, the public
+        wallet map (no private keys/seeds/signed material), the conditional
+        event_signer_public, and the source-only Phase-B block. Fails closed.
+        """
+        # Machine approval gate: literal True only (reject false/missing/string/number).
+        if caller_approved is not True:
+            _fail("assetfare_caller_approval_required")
+        amount = self._amount(amount_usd)
+        from_u = self._endpoint(from_chain, from_token, "source")
+        to_u = self._endpoint(to_chain, to_token, "destination")
+        if (from_chain, from_u) == (to_chain, to_u):
+            _fail("assetfare_identity_route_rejected")
+        if to_chain in _SOURCE_ONLY_CHAINS:
+            _fail("assetfare_destination_endpoint_invalid")
+        # Source-only routes are NOT execution-ready this phase: fail closed BEFORE
+        # any network call; never offer/call prepare or session for them.
+        if from_chain in _SOURCE_ONLY_CHAINS:
+            _fail(_EXECUTION_NOT_READY)
+        # Reject any private key / seed / signed material anywhere in the intent.
+        _reject_secret_material(
+            {
+                "wallets": wallets,
+                "event_signer_public": event_signer_public,
+                "from_chain": from_chain,
+                "to_chain": to_chain,
+            }
+        )
+        # Exact public wallet map: 1-6 entries, keys are source chains, values are
+        # public addresses only. Never a private key or seed.
+        if not isinstance(wallets, dict) or not (1 <= len(wallets) <= 6):
+            _fail("assetfare_wallets_invalid")
+        for chain, address in wallets.items():
+            if chain not in _CHAINS:
+                _fail("assetfare_wallets_invalid")
+            if not _is_public_address(address):
+                _fail("assetfare_wallet_not_public_address")
+        # The route's source and destination chains must each have a wallet.
+        if from_chain not in wallets or to_chain not in wallets:
+            _fail("assetfare_wallets_route_mismatch")
+        body: dict[str, Any] = {
+            "caller_approved": True,
+            "from_chain": from_chain,
+            "from_token": from_u,
+            "to_chain": to_chain,
+            "to_token": to_u,
+            "amount_usd": amount,
+            "wallets": dict(wallets),
+        }
+        # event_signer_public is conditional (Solana CCTP routes). If supplied it must
+        # be a public address (never a private key); pass it through when present.
+        if event_signer_public is not None:
+            if not _is_public_address(event_signer_public):
+                _fail("assetfare_event_signer_not_public_address")
+            body["event_signer_public"] = event_signer_public
+        return body
+
+    @staticmethod
+    def _validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate an upstream bounded FIRST unsigned action bundle (prepare / create).
+
+        Fail-closed on any server signing/submission claim. The bundle must carry an
+        unsigned_action and explicitly assert it is neither signed nor submitted.
+        """
+        _reject_signing_claims(payload)
+        if (
+            payload.get("server_signing") is not False
+            or payload.get("server_submission") is not False
+            or payload.get("signed") is not False
+            or payload.get("submitted") is not False
+        ):
+            _fail("assetfare_bundle_unsafe")
+        if not isinstance(payload.get("unsigned_action"), dict):
+            _fail("assetfare_bundle_missing_action")
+        return payload
+
+    @staticmethod
+    def _validate_session(payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate a v2 session workflow-state response. It must never assert signing."""
+        _reject_signing_claims(payload)
+        if not isinstance(payload.get("session_id"), str) or not payload["session_id"]:
+            _fail("assetfare_session_invalid")
+        if (
+            payload.get("server_signing") is not False
+            or payload.get("server_submission") is not False
+            or payload.get("signed") is not False
+            or payload.get("submitted") is not False
+        ):
+            _fail("assetfare_session_unsafe")
+        return payload
+
+    @staticmethod
+    def _session_token(session_token: Any) -> str:
+        if not isinstance(session_token, str) or not _SESSION_TOKEN.match(session_token):
+            _fail("assetfare_session_token_invalid")
+        return session_token
+
+    @staticmethod
+    def _idempotency_key(idempotency_key: Any) -> str:
+        if not isinstance(idempotency_key, str) or not _IDEMPOTENCY_KEY.match(idempotency_key):
+            _fail("assetfare_idempotency_key_invalid")
+        return idempotency_key
+
+    @staticmethod
+    def _session_id(session_id: Any) -> str:
+        if not isinstance(session_id, str) or not _UUID_RE.match(session_id):
+            _fail("assetfare_session_id_invalid")
+        return session_id
+
+    # ---- caller-approved one-shot prepare (POST /v2/prepare) ----
+    def prepare(
+        self,
+        caller_approved: Any,
+        from_chain: str,
+        from_token: str,
+        to_chain: str,
+        to_token: str,
+        amount_usd: Any,
+        wallets: Any,
+        event_signer_public: Any = None,
+    ) -> dict[str, Any]:
+        """Explicit caller-approved one-shot POST /v2/prepare.
+
+        Returns the fresh re-quoted bounded FIRST unsigned action bundle. NEVER
+        auto-called from a quote; rejects source-only Phase-B routes and any private
+        key / seed / signed transaction. AssetFare never signs or submits.
+        """
+        body = self._action_intent(
+            caller_approved, from_chain, from_token, to_chain, to_token, amount_usd, wallets, event_signer_public
+        )
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request("POST", "/v2/prepare", body, budget_deadline)
+        return self._validate_bundle(data)
+
+    # ---- caller-approved full session lifecycle (POST /v2/session ...) ----
+    def session_create(
+        self,
+        caller_approved: Any,
+        from_chain: str,
+        from_token: str,
+        to_chain: str,
+        to_token: str,
+        amount_usd: Any,
+        wallets: Any,
+        session_token: Any,
+        idempotency_key: Any,
+        event_signer_public: Any = None,
+    ) -> dict[str, Any]:
+        """Explicit caller-approved idempotent POST /v2/session create.
+
+        The CALLER-GENERATED session capability token (from new_session_capability)
+        is REQUIRED input and is sent only in the X-AssetFare-Session-Token header;
+        this method does NOT generate it. Retrying with the same token + idempotency
+        key recovers the same session (lost-response crash recovery). Never auto-chains,
+        signs, or submits.
+        """
+        body = self._action_intent(
+            caller_approved, from_chain, from_token, to_chain, to_token, amount_usd, wallets, event_signer_public
+        )
+        token = self._session_token(session_token)
+        body["idempotency_key"] = self._idempotency_key(idempotency_key)
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request(
+            "POST", "/v2/session", body, budget_deadline, extra_headers={_SESSION_TOKEN_HEADER: token}
+        )
+        return self._validate_session(data)
+
+    def session_get(self, session_token: Any, session_id: Any) -> dict[str, Any]:
+        """Read a v2 session's current workflow state and current unsigned action."""
+        token = self._session_token(session_token)
+        sid = self._session_id(session_id)
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request(
+            "GET", f"/v2/session/{sid}", None, budget_deadline, extra_headers={_SESSION_TOKEN_HEADER: token}
+        )
+        return self._validate_session(data)
+
+    def observe_source(
+        self, session_token: Any, session_id: Any, idempotency_key: Any, transaction_hashes: Any
+    ) -> dict[str, Any]:
+        """Observe the caller's ALREADY-submitted source tx hashes and advance the workflow.
+
+        Only caller-submitted transaction hashes are observed; this never submits a
+        transaction and never auto-chains.
+        """
+        token = self._session_token(session_token)
+        sid = self._session_id(session_id)
+        key = self._idempotency_key(idempotency_key)
+        if (
+            not isinstance(transaction_hashes, list)
+            or not (1 <= len(transaction_hashes) <= 8)
+            or not all(isinstance(h, str) and _TX_HASH.match(h) for h in transaction_hashes)
+        ):
+            _fail("assetfare_transaction_hashes_invalid")
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request(
+            "POST",
+            f"/v2/session/{sid}/observe-source",
+            {"idempotency_key": key, "transaction_hashes": list(transaction_hashes)},
+            budget_deadline,
+            extra_headers={_SESSION_TOKEN_HEADER: token},
+        )
+        return self._validate_session(data)
+
+    def observe_output(
+        self, session_token: Any, session_id: Any, idempotency_key: Any, transaction_hash: Any = None
+    ) -> dict[str, Any]:
+        """Observe the caller's ALREADY-produced destination/bridge output and advance."""
+        token = self._session_token(session_token)
+        sid = self._session_id(session_id)
+        key = self._idempotency_key(idempotency_key)
+        body: dict[str, Any] = {"idempotency_key": key}
+        if transaction_hash is not None:
+            if not isinstance(transaction_hash, str) or not _TX_HASH.match(transaction_hash):
+                _fail("assetfare_transaction_hash_invalid")
+            body["transaction_hash"] = transaction_hash
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request(
+            "POST",
+            f"/v2/session/{sid}/observe-output",
+            body,
+            budget_deadline,
+            extra_headers={_SESSION_TOKEN_HEADER: token},
+        )
+        return self._validate_session(data)
+
+    def refresh_action(self, session_token: Any, session_id: Any, idempotency_key: Any) -> dict[str, Any]:
+        """Replace an expired, unsubmitted session action with a fresh quote-bound one."""
+        token = self._session_token(session_token)
+        sid = self._session_id(session_id)
+        key = self._idempotency_key(idempotency_key)
+        budget_deadline = self._monotonic() + _STALE_BUDGET_S
+        data = self._request(
+            "POST",
+            f"/v2/session/{sid}/refresh-action",
+            {"idempotency_key": key},
+            budget_deadline,
+            extra_headers={_SESSION_TOKEN_HEADER: token},
+        )
+        return self._validate_session(data)
