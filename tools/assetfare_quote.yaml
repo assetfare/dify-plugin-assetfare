@@ -8,7 +8,7 @@ description:
   human:
     en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (USD 1-1000). Read-only; no wallet, signing, or submission.
     zh_Hans: 获取一次包含费用的非托管跨链报价（1-1000 美元）。只读；无钱包、签名或提交。
-  llm: Request one fresh AssetFare quote for moving value between two supported (chain, token) endpoints in the USD 1-1000 band, then stop and compare it with other executable routes. Never authenticate, prepare, sign, submit, swap, or bridge from this tool.
+  llm: Request one fresh AssetFare quote for moving value between two supported (chain, token) endpoints in the USD 1-1000 band, then compare it with other executable routes. Only after the caller explicitly approves the selected route, follow the returned REST /v2/prepare handoff with public wallet addresses for one unsigned action plan. This tool itself never authenticates, prepares, signs, submits, swaps, or bridges.
 parameters:
   - name: from_chain
     type: select
