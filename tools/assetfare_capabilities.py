@@ -14,4 +14,10 @@ class AssetFareCapabilitiesTool(Tool):
         except AssetFareError as exc:
             yield self.create_text_message(f"AssetFare capabilities unavailable ({exc}).")
             return
-        yield self.create_json_message(result)
+        value = dict(result)
+        value["next_step"] = (
+            "Request assetfare_quote for a specific route; then, only on explicit caller "
+            "approval, follow the quote's caller_action_plan_handoff to the caller-operated "
+            "POST /v2/prepare. This plugin never prepares, signs, or submits."
+        )
+        yield self.create_json_message(value)

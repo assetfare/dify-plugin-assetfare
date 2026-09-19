@@ -20,25 +20,9 @@ class AssetFareQuoteTool(Tool):
         except AssetFareError as exc:
             yield self.create_text_message(f"AssetFare quote unavailable ({exc}).")
             return
-        value = dict(result)
-        value["caller_action_plan_handoff"] = {
-            "kind": "caller_operated_rest_prepare",
-            "url": "https://api.assetfare.dev/v2/prepare",
-            "method": "POST",
-            "requires_explicit_caller_approval": True,
-            "requires_public_wallet_addresses": True,
-            "request_fields": [
-                "from_chain",
-                "from_token",
-                "to_chain",
-                "to_token",
-                "amount_usd",
-                "wallets",
-                "event_signer_public",
-            ],
-            "assetfare_server_signing": False,
-            "assetfare_server_submission": False,
-            "caller_must_verify_sign_and_submit": True,
-            "note": "Guidance only: this Dify tool does not call prepare or receive a private key.",
-        }
-        yield self.create_json_message(value)
+        # The client already surfaces the upstream caller_action_plan_handoff
+        # (validated against the caller-operated REST /v2/prepare contract, with a
+        # canonical fallback only when upstream omits it). The tool does not
+        # synthesize a static copy that could drift from the contract, and it never
+        # calls prepare, receives a private key, signs, or submits.
+        yield self.create_json_message(dict(result))

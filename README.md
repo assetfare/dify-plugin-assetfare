@@ -4,12 +4,16 @@ Two **read-only** tools that let a Dify Agent, Chatflow, or Workflow discover an
 quote a non-custodial cross-chain route from the
 [AssetFare](https://api.assetfare.dev) v2 API.
 
-- `assetfare_capabilities` — the five source chains, ten `(chain, token)`
-  source endpoints, 74 directed routes, Polygon source-only constraint, and a check that the server cannot sign or
+- `assetfare_capabilities` — the six source chains (Solana, Base, Arbitrum,
+  Robinhood, plus Polygon and Optimism as native-USDC **source-only** to
+  Base/Arbitrum), eleven `(chain, token)` source endpoints, 76 directed routes,
+  the source-only constraints, and a check that the server cannot sign or
   submit. No parameters.
 - `assetfare_quote` — one fresh, fee-inclusive quote for a route in the
   USD 1–1,000 band. Parameters: `from_chain`, `from_token`, `to_chain`,
-  `to_token`, `amount_usd`.
+  `to_token`, `amount_usd`. The quote surfaces AssetFare's
+  `caller_action_plan_handoff` (caller-operated REST `POST /v2/prepare`) — the
+  next step the caller may take, on explicit approval, with its own wallet.
 
 ## Setup
 

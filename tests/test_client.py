@@ -29,26 +29,62 @@ ENDPOINTS = [
     ("robinhood", "ETH"),
     ("robinhood", "USDG"),
     ("polygon", "USDC"),
+    ("optimism", "USDC"),
 ]
+
+# Chains that may only be a source (native USDC -> base/arbitrum USDC), never a
+# destination: polygon (1bp) and optimism (0bp).
+SOURCE_ONLY_CHAINS = {"polygon", "optimism"}
 
 
 def valid_caps():
     return {
         "status": "capped_public_agent_release",
         "public_api_enabled": True,
-        "directed_conversion_routes": 74,
-        "unsigned_route_plans_ready": 74,
+        "directed_conversion_routes": 76,
+        "unsigned_route_plans_ready": 76,
         "server_signing": False,
         "server_submission": False,
-        "chains": ["arbitrum", "base", "polygon", "robinhood", "solana"],
+        "chains": ["arbitrum", "base", "optimism", "polygon", "robinhood", "solana"],
         "asset_endpoints": [{"chain": c, "token": t} for c, t in ENDPOINTS],
-        "source_only_asset_endpoints": [{"chain": "polygon", "token": "USDC"}],
-        "source_only_routes": ["polygon:USDC->base:USDC", "polygon:USDC->arbitrum:USDC"],
+        "source_only_asset_endpoints": [
+            {"chain": "polygon", "token": "USDC"},
+            {"chain": "optimism", "token": "USDC"},
+        ],
+        "source_only_routes": [
+            "polygon:USDC->base:USDC",
+            "polygon:USDC->arbitrum:USDC",
+            "optimism:USDC->base:USDC",
+            "optimism:USDC->arbitrum:USDC",
+        ],
     }
 
 
 def valid_status():
     return {"status": "capped_public_agent_release", "server_signing": False, "server_submission": False}
+
+
+def valid_handoff():
+    return {
+        "kind": "caller_operated_rest_prepare",
+        "url": "https://api.assetfare.dev/v2/prepare",
+        "method": "POST",
+        "requires_explicit_caller_approval": True,
+        "requires_public_wallet_addresses": True,
+        "request_fields": [
+            "from_chain",
+            "from_token",
+            "to_chain",
+            "to_token",
+            "amount_usd",
+            "wallets",
+            "event_signer_public",
+        ],
+        "assetfare_server_signing": False,
+        "assetfare_server_submission": False,
+        "caller_must_verify_sign_and_submit": True,
+        "note": "Caller-operated prepare; server never signs or submits.",
+    }
 
 
 def valid_quote(fc, ft, tc, tt, amount):
@@ -86,6 +122,7 @@ def valid_quote(fc, ft, tc, tt, amount):
             "first_unsigned_action_supported": True,
             "future_actions_require_verified_receipts": True,
         },
+        "caller_action_plan_handoff": valid_handoff(),
     }
 
 
@@ -150,9 +187,18 @@ def test_trust_env_disabled():
 # ---- capabilities ----
 def test_capabilities_ok():
     caps = client({"/v2/capabilities": valid_caps(), "/v2/status": valid_status()}).get_capabilities()
-    assert caps["directed_conversion_routes"] == 74
-    assert len(caps["asset_endpoints"]) == 10
+    assert caps["directed_conversion_routes"] == 76
+    assert caps["unsigned_route_plans_ready"] == 76
+    assert len(caps["asset_endpoints"]) == 11
     assert caps["server_signs_or_submits"] is False
+    assert sorted(caps["source_only_asset_endpoints"]) == ["optimism:USDC", "polygon:USDC"]
+    assert set(caps["source_only_routes"]) == {
+        "polygon:USDC->base:USDC",
+        "polygon:USDC->arbitrum:USDC",
+        "optimism:USDC->base:USDC",
+        "optimism:USDC->arbitrum:USDC",
+    }
+    assert "optimism" in caps["chains"] and len(caps["chains"]) == 6
 
 
 @pytest.mark.parametrize(
@@ -183,7 +229,7 @@ def test_status_boundary_fail():
         ).get_capabilities()
 
 
-# ---- quote wiring + 74 routes ----
+# ---- quote wiring + 76 routes ----
 def test_quote_exact_body_and_bounded_return():
     s = _Session({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)})
     out = af(session=s).get_quote("solana", "usdc", "base", "eth", 250)
@@ -197,31 +243,99 @@ def test_quote_exact_body_and_bounded_return():
         "amount_usd": 250.0,
     }
     assert out["output_symbol"] == "ETH" and out["server_signs_or_submits"] is False
-    assert "fee_collection_steps" not in out
+    # Fee eligibility surfaced (conditional, not a flat fee) and steps passed through.
+    assert out["assetfare_fee_bps"] == 1
+    assert out["assetfare_fee_conditional"] is True
+    assert out["fee_collection_steps"] == []
+    assert "eligible successful executor step" in out["assetfare_fee_note"]
 
 
-def test_all_74_routes_and_9_identity():
+def test_quote_surfaces_caller_action_plan_handoff():
+    out = client({"/v2/quote": valid_quote("solana", "USDC", "base", "ETH", 250)}).get_quote(
+        "solana", "USDC", "base", "ETH", 250
+    )
+    handoff = out["caller_action_plan_handoff"]
+    assert handoff["kind"] == "caller_operated_rest_prepare"
+    assert handoff["url"] == "https://api.assetfare.dev/v2/prepare"
+    assert handoff["method"] == "POST"
+    assert handoff["requires_explicit_caller_approval"] is True
+    assert handoff["assetfare_server_signing"] is False
+    assert handoff["assetfare_server_submission"] is False
+    assert handoff["caller_must_verify_sign_and_submit"] is True
+    assert handoff["request_fields"] == [
+        "from_chain",
+        "from_token",
+        "to_chain",
+        "to_token",
+        "amount_usd",
+        "wallets",
+        "event_signer_public",
+    ]
+
+
+def test_quote_handoff_fallback_when_upstream_omits():
+    q = valid_quote("solana", "USDC", "base", "ETH", 250)
+    q.pop("caller_action_plan_handoff")
+    out = client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
+    handoff = out["caller_action_plan_handoff"]
+    assert handoff["kind"] == "caller_operated_rest_prepare"
+    assert handoff["url"] == "https://api.assetfare.dev/v2/prepare"
+    assert handoff["assetfare_server_signing"] is False
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda h: h.update(kind="server_operated"),
+        lambda h: h.update(url="https://api.assetfare.dev/v2/submit"),
+        lambda h: h.update(method="GET"),
+        lambda h: h.update(assetfare_server_signing=True),  # server claims signing -> fail closed
+        lambda h: h.update(assetfare_server_submission=True),
+        lambda h: h.update(requires_explicit_caller_approval=False),
+        lambda h: h.update(caller_must_verify_sign_and_submit=False),
+        lambda h: h.update(request_fields=["from_chain"]),  # wrong field set
+    ],
+)
+def test_quote_handoff_malformed_rejected(mut):
+    q = valid_quote("solana", "USDC", "base", "ETH", 250)
+    mut(q["caller_action_plan_handoff"])
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "ETH", 250)
+
+
+def test_all_76_routes_and_9_identity():
     ok = identity = 0
+    dests = [endpoint for endpoint in ENDPOINTS if endpoint[0] not in SOURCE_ONLY_CHAINS]
     for fc, ft in ENDPOINTS:
-        for tc, tt in [endpoint for endpoint in ENDPOINTS if endpoint[0] != "polygon"]:
+        for tc, tt in dests:
             s = _Session({"/v2/quote": valid_quote(fc, ft, tc, tt, 100)})
             c = af(session=s)
             if (fc, ft) == (tc, tt):
                 with pytest.raises(AssetFareError):
                     c.get_quote(fc, ft, tc, tt, 100)
                 identity += 1
-            elif fc != "polygon" or (ft == "USDC" and tc in {"base", "arbitrum"} and tt == "USDC"):
+            elif fc not in SOURCE_ONLY_CHAINS or (ft == "USDC" and tc in {"base", "arbitrum"} and tt == "USDC"):
                 c.get_quote(fc, ft, tc, tt, 100)
                 ok += 1
             else:
                 with pytest.raises(AssetFareError):
                     c.get_quote(fc, ft, tc, tt, 100)
-    assert ok == 74 and identity == 9
+    assert ok == 76 and identity == 9
 
 
-def test_polygon_destination_rejected():
+@pytest.mark.parametrize("dest", ["polygon", "optimism"])
+def test_source_only_destination_rejected(dest):
     with pytest.raises(AssetFareError):
-        client({"/v2/quote": valid_quote("base", "USDC", "polygon", "USDC", 10)}).get_quote("base", "USDC", "polygon", "USDC", 10)
+        client({"/v2/quote": valid_quote("base", "USDC", dest, "USDC", 10)}).get_quote(
+            "base", "USDC", dest, "USDC", 10
+        )
+
+
+def test_optimism_source_only_route_ok():
+    out = client({"/v2/quote": valid_quote("optimism", "USDC", "base", "USDC", 100)}).get_quote(
+        "optimism", "USDC", "base", "USDC", 100
+    )
+    assert out["from"] == "optimism:USDC" and out["to"] == "base:USDC"
 
 
 @pytest.mark.parametrize("amt", [0.5, 0, 1500, True, "250", float("nan"), float("inf")])

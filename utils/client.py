@@ -35,7 +35,11 @@ _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 86_400
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
-_CHAINS = ("arbitrum", "base", "polygon", "robinhood", "solana")
+_CHAINS = ("arbitrum", "base", "optimism", "polygon", "robinhood", "solana")
+# Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
+# are never a destination. polygon collects 1bp on its audited executor step;
+# optimism collects 0bp. Both are symmetric in routing (USDC -> base/arbitrum USDC).
+_SOURCE_ONLY_CHAINS = frozenset({"optimism", "polygon"})
 _ENDPOINTS = frozenset(
     {
         ("solana", "SOL"),
@@ -48,11 +52,53 @@ _ENDPOINTS = frozenset(
         ("robinhood", "ETH"),
         ("robinhood", "USDG"),
         ("polygon", "USDC"),
+        ("optimism", "USDC"),
     }
 )
-_EXPECTED_ROUTES = 74
+_SOURCE_ONLY_ENDPOINTS = frozenset({("optimism", "USDC"), ("polygon", "USDC")})
+_SOURCE_ONLY_ROUTES = frozenset(
+    {
+        "polygon:USDC->base:USDC",
+        "polygon:USDC->arbitrum:USDC",
+        "optimism:USDC->base:USDC",
+        "optimism:USDC->arbitrum:USDC",
+    }
+)
+_EXPECTED_ROUTES = 76
 _MIN_USD = 1.0
 _MAX_USD = 1000.0
+
+# Caller-operated REST /v2/prepare handoff contract. The client SURFACES the
+# upstream `caller_action_plan_handoff` from the /v2/quote response (validated
+# below); this canonical shape is used only as a fallback when upstream omits it.
+# This plugin never calls /v2/prepare, receives no private key, and never signs
+# or submits -- the handoff is guidance the caller executes with its own wallet.
+_PREPARE_URL = "https://api.assetfare.dev/v2/prepare"
+_HANDOFF_REQUEST_FIELDS = [
+    "from_chain",
+    "from_token",
+    "to_chain",
+    "to_token",
+    "amount_usd",
+    "wallets",
+    "event_signer_public",
+]
+_CALLER_HANDOFF_FALLBACK = {
+    "kind": "caller_operated_rest_prepare",
+    "url": _PREPARE_URL,
+    "method": "POST",
+    "requires_explicit_caller_approval": True,
+    "requires_public_wallet_addresses": True,
+    "request_fields": list(_HANDOFF_REQUEST_FIELDS),
+    "assetfare_server_signing": False,
+    "assetfare_server_submission": False,
+    "caller_must_verify_sign_and_submit": True,
+    "note": (
+        "Guidance only: this Dify tool does not call prepare or receive a private key. "
+        "On explicit caller approval the caller POSTs public wallet addresses to /v2/prepare, "
+        "then verifies, signs, and submits with its own wallet."
+    ),
+}
 
 
 class AssetFareError(RuntimeError):
@@ -182,6 +228,44 @@ class AssetFareClient:
             _fail("assetfare_safety_boundary_failed")
 
     @staticmethod
+    def _validate_caller_handoff(node: Any) -> dict[str, Any]:
+        # Surface the upstream caller_action_plan_handoff, failing closed on any
+        # deviation from the caller-operated REST /v2/prepare contract. Anything
+        # claiming the server will sign/submit is a hard safety-boundary failure.
+        if not isinstance(node, dict):
+            _fail("assetfare_response_invalid")
+        if node.get("kind") != "caller_operated_rest_prepare":
+            _fail("assetfare_response_invalid")
+        if node.get("url") != _PREPARE_URL or node.get("method") != "POST":
+            _fail("assetfare_response_invalid")
+        if node.get("requires_explicit_caller_approval") is not True:
+            _fail("assetfare_response_invalid")
+        if node.get("requires_public_wallet_addresses") is not True:
+            _fail("assetfare_response_invalid")
+        if node.get("caller_must_verify_sign_and_submit") is not True:
+            _fail("assetfare_response_invalid")
+        if node.get("assetfare_server_signing") is not False or node.get("assetfare_server_submission") is not False:
+            _fail("assetfare_safety_boundary_failed")
+        fields = node.get("request_fields")
+        if not isinstance(fields, list) or list(fields) != _HANDOFF_REQUEST_FIELDS:
+            _fail("assetfare_response_invalid")
+        note = node.get("note")
+        if note is not None and not isinstance(note, str):
+            _fail("assetfare_response_invalid")
+        return {
+            "kind": "caller_operated_rest_prepare",
+            "url": _PREPARE_URL,
+            "method": "POST",
+            "requires_explicit_caller_approval": True,
+            "requires_public_wallet_addresses": True,
+            "request_fields": list(_HANDOFF_REQUEST_FIELDS),
+            "assetfare_server_signing": False,
+            "assetfare_server_submission": False,
+            "caller_must_verify_sign_and_submit": True,
+            "note": note if isinstance(note, str) else _CALLER_HANDOFF_FALLBACK["note"],
+        }
+
+    @staticmethod
     def _endpoint(chain: Any, token: Any, field: str) -> str:
         if not isinstance(chain, str) or not isinstance(token, str):
             raise AssetFareError(f"assetfare_{field}_endpoint_invalid")
@@ -232,11 +316,22 @@ class AssetFareClient:
             got.add((ep["chain"], str(ep["token"]).upper()))
         if len(got) != len(_ENDPOINTS) or got != _ENDPOINTS:
             _fail("assetfare_safety_boundary_failed")
-        if caps.get("source_only_asset_endpoints") != [{"chain": "polygon", "token": "USDC"}]:
+        so_eps = caps.get("source_only_asset_endpoints")
+        if not isinstance(so_eps, list) or len(so_eps) != len(_SOURCE_ONLY_ENDPOINTS):
             _fail("assetfare_safety_boundary_failed")
-        expected_source_only = {"polygon:USDC->base:USDC", "polygon:USDC->arbitrum:USDC"}
+        so_got = set()
+        for ep in so_eps:
+            if not isinstance(ep, dict) or "chain" not in ep or "token" not in ep:
+                _fail("assetfare_safety_boundary_failed")
+            so_got.add((ep["chain"], str(ep["token"]).upper()))
+        if so_got != _SOURCE_ONLY_ENDPOINTS:
+            _fail("assetfare_safety_boundary_failed")
         source_only = caps.get("source_only_routes")
-        if not isinstance(source_only, list) or len(source_only) != 2 or set(source_only) != expected_source_only:
+        if (
+            not isinstance(source_only, list)
+            or len(source_only) != len(_SOURCE_ONLY_ROUTES)
+            or set(source_only) != _SOURCE_ONLY_ROUTES
+        ):
             _fail("assetfare_safety_boundary_failed")
         return {
             "status": caps["status"],
@@ -244,8 +339,8 @@ class AssetFareClient:
             "asset_endpoints": [f"{c}:{t}" for (c, t) in sorted(_ENDPOINTS)],
             "directed_conversion_routes": _EXPECTED_ROUTES,
             "unsigned_route_plans_ready": _EXPECTED_ROUTES,
-            "source_only_asset_endpoints": ["polygon:USDC"],
-            "source_only_routes": sorted(expected_source_only),
+            "source_only_asset_endpoints": sorted(f"{c}:{t}" for (c, t) in _SOURCE_ONLY_ENDPOINTS),
+            "source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
             "amount_usd_min": _MIN_USD,
             "amount_usd_max": _MAX_USD,
             "quote_only": True,
@@ -261,9 +356,11 @@ class AssetFareClient:
         to_u = self._endpoint(to_chain, to_token, "destination")
         if (from_chain, from_u) == (to_chain, to_u):
             raise AssetFareError("assetfare_identity_route_rejected")
-        if to_chain == "polygon":
+        if to_chain in _SOURCE_ONLY_CHAINS:
             raise AssetFareError("assetfare_destination_endpoint_invalid")
-        if from_chain == "polygon" and not (from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"):
+        if from_chain in _SOURCE_ONLY_CHAINS and not (
+            from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"
+        ):
             raise AssetFareError("assetfare_source_endpoint_invalid")
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
         data = self._request(
@@ -371,6 +468,26 @@ class AssetFareClient:
         if execution.get("future_actions_require_verified_receipts") is not True:
             _fail("assetfare_response_invalid")
 
+        # Surface the upstream caller_action_plan_handoff; fall back to the
+        # canonical caller-operated REST /v2/prepare shape only if upstream omits
+        # it (so a static local copy cannot silently drift from the contract).
+        handoff_raw = data.get("caller_action_plan_handoff")
+        if handoff_raw is None:
+            caller_action_plan_handoff = dict(_CALLER_HANDOFF_FALLBACK)
+        else:
+            caller_action_plan_handoff = self._validate_caller_handoff(handoff_raw)
+
+        # The AssetFare fee is conditional: any advertised bps (0 or 1) is collected
+        # only on an eligible successful executor step. Surface fee_collection_steps
+        # and an explicit note rather than presenting a flat, unconditional fee.
+        fee_steps_out = [int(s) for s in fee_steps]
+        fee_note = (
+            f"AssetFare {fee}bp is collected only on an eligible successful executor step "
+            "(conditional, not an unconditional flat fee)."
+            if fee > 0
+            else "No AssetFare fee is collected on this route (0bp)."
+        )
+
         return {
             "from": expected_from,
             "to": expected_to,
@@ -381,6 +498,9 @@ class AssetFareClient:
             "expected_receive_usd": float(exp_usd),
             "estimated_min_receive_usd": float(mn_usd),
             "assetfare_fee_bps": fee,
+            "assetfare_fee_conditional": fee > 0,
+            "fee_collection_steps": fee_steps_out,
+            "assetfare_fee_note": fee_note,
             "estimated_time_seconds": eta if _int(eta) else None,
             "non_atomic": risk["non_atomic"],
             "quote_id": data["quote_id"],
@@ -388,4 +508,5 @@ class AssetFareClient:
             "ttl_seconds": ttl,
             "execution_supported": True,
             "server_signs_or_submits": False,
+            "caller_action_plan_handoff": caller_action_plan_handoff,
         }

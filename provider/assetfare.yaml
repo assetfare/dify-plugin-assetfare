@@ -5,8 +5,8 @@ identity:
     en_US: AssetFare
     zh_Hans: AssetFare
   description:
-    en_US: Read-only non-custodial route quotes across five source chains, including Polygon native-USDC source routes.
-    zh_Hans: 覆盖五个源链的只读非托管路由报价，包括 Polygon 原生 USDC 源路由。
+    en_US: Read-only non-custodial route quotes across six source chains, including Polygon (1bp) and Optimism (0bp) native-USDC source-only routes to Base/Arbitrum.
+    zh_Hans: 覆盖六个源链的只读非托管路由报价，包括 Polygon（1bp）与 Optimism（0bp）原生 USDC 仅作源、通往 Base/Arbitrum 的路由。
   icon: icon.svg
 credentials_for_provider: {}
 tools:
