@@ -537,12 +537,13 @@ def test_executable_quote_with_blocked_handoff_rejected():
         client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
-# ---- fee EXACTLY {0,1} ----
+# ---- fee EXACTLY 1bp ----
 @pytest.mark.parametrize(
     "mut",
     [
         lambda o: o.update(assetfare_fee_bps=8, fee_modeled_bps=8),  # 8bp out of range
         lambda o: o.update(assetfare_fee_bps=2, fee_modeled_bps=2),  # >1
+        lambda o: o.update(assetfare_fee_bps=0, fee_modeled_bps=0, fee_collectible_now=False, fee_collection_steps=[]),
         lambda o: o.update(assetfare_fee_bps=1, fee_collection_steps=[]),  # fee1 needs one step
         lambda o: o.update(assetfare_fee_bps=0, fee_collection_steps=[0]),  # fee0 needs none
         lambda o: o.update(assetfare_fee_bps=1, fee_collection_steps=[0, 0]),  # duplicate/2-step

@@ -9,6 +9,9 @@ and quotes a route, and — **only on the caller's explicit approval** — build
 credential.** The caller verifies, signs, and submits every action with its own
 wallet, outside this plugin.
 
+Every one of the 76 routes charges exactly 1bp at one eligible successful
+atomic action; no live route is fee-free.
+
 ## The six-chain surface
 
 Six source chains, eleven `(chain, token)` source endpoints, and **76 directed
