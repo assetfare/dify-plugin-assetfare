@@ -23,8 +23,8 @@ class AssetFarePrepareTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage, None, None]:
         # Explicit caller-approved one-shot POST /v2/prepare. Requires caller_approved
         # is literally true and the route's exact PUBLIC wallet map. Never auto-called
-        # from a quote; rejects source-only Phase-B routes and any private key / seed /
-        # signed transaction. AssetFare never signs or submits.
+        # from a quote; rejects any private key / seed / signed transaction.
+        # AssetFare never signs or submits.
         event_signer = tool_parameters.get("event_signer_public")
         event_signer = event_signer if (isinstance(event_signer, str) and event_signer.strip()) else None
         try:

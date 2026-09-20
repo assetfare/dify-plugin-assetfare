@@ -24,7 +24,6 @@ REQUEST_FIELDS = [
     "wallets",
     "event_signer_public",
 ]
-EXECUTION_NOT_READY = "execution_not_ready_phase_b"
 
 EVM = "0x" + "a" * 40
 SOL = "So11111111111111111111111111111111111111112"
@@ -50,13 +49,13 @@ ENDPOINTS = [
 ]
 
 # Chains that may only be a source (native USDC -> base/arbitrum USDC), never a
-# destination: polygon (1bp) and optimism (0bp).
+# destination: polygon and optimism (both audited 1bp source executors).
 SOURCE_ONLY_CHAINS = {"polygon", "optimism"}
 DESTINATION_ENDPOINTS = [(c, t) for (c, t) in ENDPOINTS if c not in SOURCE_ONLY_CHAINS]
 
 
 def all_routes():
-    """Generate the 76 directed quote-discovery routes (72 executable + 4 source-only)."""
+    """Generate all 76 execution-ready directed routes."""
     routes = []
     for fc, ft in ENDPOINTS:
         for tc, tt in DESTINATION_ENDPOINTS:
@@ -74,8 +73,8 @@ def valid_caps():
         "public_api_enabled": True,
         "directed_conversion_routes": 76,
         "unsigned_route_plans_ready": 76,
-        "execution_ready_routes": 72,
-        "phase_b_blocked_routes": 4,
+        "execution_ready_routes": 76,
+        "phase_b_blocked_routes": 0,
         "server_signing": False,
         "server_submission": False,
         "chains": ["arbitrum", "base", "optimism", "polygon", "robinhood", "solana"],
@@ -90,12 +89,7 @@ def valid_caps():
             "optimism:USDC->base:USDC",
             "optimism:USDC->arbitrum:USDC",
         ],
-        "blocked_source_only_routes": [
-            "polygon:USDC->base:USDC",
-            "polygon:USDC->arbitrum:USDC",
-            "optimism:USDC->base:USDC",
-            "optimism:USDC->arbitrum:USDC",
-        ],
+        "blocked_source_only_routes": [],
     }
 
 
@@ -153,48 +147,18 @@ def executable_handoff():
     }
 
 
-def blocked_handoff():
-    return {
-        "kind": "caller_operated_rest_prepare",
-        "method": "POST",
-        "requires_explicit_caller_approval": True,
-        "requires_public_wallet_addresses": True,
-        "request_fields": list(REQUEST_FIELDS),
-        "assetfare_server_signing": False,
-        "assetfare_server_submission": False,
-        "caller_must_verify_sign_and_submit": True,
-        "requires_fresh_requote": True,
-        "automatic_prepare_call_forbidden": True,
-        "note": "Quote/action-plan discovery only: source-only, no REST prepare endpoint offered.",
-        "available": False,
-        "blocker": EXECUTION_NOT_READY,
-    }
-
-
 def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
     steps = [{"kind": "burn"}]
-    if source_only:
-        offer_fee = fee
-        collectible = False
-        fee_steps = [0] if fee == 1 else []
-        execution = {
-            "supported": False,
-            "first_unsigned_action_supported": False,
-            "future_actions_require_verified_receipts": True,
-            "blocker": EXECUTION_NOT_READY,
-        }
-        handoff = blocked_handoff()
-    else:
-        offer_fee = fee
-        collectible = fee == 1
-        fee_steps = [0] if fee == 1 else []
-        execution = {
-            "supported": True,
-            "first_unsigned_action_supported": True,
-            "future_actions_require_verified_receipts": True,
-            "blocker": None,
-        }
-        handoff = executable_handoff()
+    offer_fee = fee
+    collectible = fee == 1
+    fee_steps = [0] if fee == 1 else []
+    execution = {
+        "supported": True,
+        "first_unsigned_action_supported": True,
+        "future_actions_require_verified_receipts": True,
+        "blocker": None,
+    }
+    handoff = executable_handoff()
     return {
         "quote_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         "status": "capped_public_agent_release",
@@ -210,7 +174,7 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
             "assetfare_fee_bps": offer_fee,
             "fee_modeled_bps": offer_fee,
             "fee_collectible_now": collectible,
-            "fee_blocker": EXECUTION_NOT_READY if source_only else None,
+            "fee_blocker": None,
             "fee_collection_steps": fee_steps,
             "fee_collection": "only_on_eligible_successful_executor_step",
             "estimated_time_seconds": 23,
@@ -335,15 +299,11 @@ class _Upstream:
         if path == "/v2/prepare" and method == "POST":
             if payload.get("caller_approved") is not True:
                 return _Resp(400, {"error": "caller_approval_required"})
-            if payload.get("from_chain") in SOURCE_ONLY_CHAINS:
-                return _Resp(409, {"error": EXECUTION_NOT_READY})
             return _Resp(200, self._bundle())
 
         if path == "/v2/session" and method == "POST":
             if payload.get("caller_approved") is not True:
                 return _Resp(400, {"error": "caller_approval_required"})
-            if payload.get("from_chain") in SOURCE_ONLY_CHAINS:
-                return _Resp(409, {"error": EXECUTION_NOT_READY})
             if not token:
                 return _Resp(401, {"error": "session_token_required"})
             key = (token, payload.get("idempotency_key"))
@@ -434,13 +394,13 @@ def test_trust_env_disabled():
     assert s.trust_env is False
 
 
-# ---- capabilities (6-chain surface: 11 endpoints, 76 routes, 72 executable, 4 blocked) ----
+# ---- capabilities (6-chain surface: 11 endpoints, all 76 executable) ----
 def test_capabilities_ok():
     caps = client({"/v2/capabilities": valid_caps(), "/v2/status": valid_status()}).get_capabilities()
     assert caps["directed_conversion_routes"] == 76
     assert caps["unsigned_route_plans_ready"] == 76
-    assert caps["execution_ready_routes"] == 72
-    assert caps["phase_b_blocked_routes"] == 4
+    assert caps["execution_ready_routes"] == 76
+    assert caps["phase_b_blocked_routes"] == 0
     assert len(caps["asset_endpoints"]) == 11
     assert caps["server_signs_or_submits"] is False
     assert sorted(caps["source_only_asset_endpoints"]) == ["optimism:USDC", "polygon:USDC"]
@@ -450,15 +410,16 @@ def test_capabilities_ok():
         "optimism:USDC->base:USDC",
         "optimism:USDC->arbitrum:USDC",
     }
-    assert set(caps["blocked_source_only_routes"]) == set(caps["source_only_routes"])
+    assert caps["blocked_source_only_routes"] == []
 
 
 @pytest.mark.parametrize(
     "mut",
     [
         lambda c: c.update(directed_conversion_routes=75),
-        lambda c: c.update(execution_ready_routes=76),  # must be 72
-        lambda c: c.update(phase_b_blocked_routes=0),  # must be 4
+        lambda c: c.update(execution_ready_routes=72),
+        lambda c: c.update(phase_b_blocked_routes=4),
+        lambda c: c.update(blocked_source_only_routes=["polygon:USDC->base:USDC"]),
         lambda c: c.update(server_signing=True),
         lambda c: c.pop("blocked_source_only_routes"),
     ],
@@ -540,39 +501,38 @@ def test_quote_handoff_malformed_rejected(mut):
         client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
-# ---- source-only quote: available:false handled, no prepare offered ----
-def test_source_only_quote_available_false():
+# ---- source-only directional quotes use the same executable handoff ----
+def test_source_only_quote_execution_ready():
     q = valid_quote("polygon", "USDC", "base", "USDC", 100, source_only=True, fee=1)
     out = client({"/v2/quote": q}).get_quote("polygon", "USDC", "base", "USDC", 100)
     assert out["source_only"] is True
-    assert out["execution_supported"] is False
-    assert out["execution_blocker"] == EXECUTION_NOT_READY
-    assert out["fee_collectible_now"] is False
+    assert out["execution_supported"] is True
+    assert out["execution_blocker"] is None
+    assert out["fee_collectible_now"] is True
     handoff = out["caller_action_plan_handoff"]
-    assert handoff["available"] is False
-    assert handoff["blocker"] == EXECUTION_NOT_READY
-    assert "url" not in handoff and "options" not in handoff
+    assert handoff["available"] is True
+    assert handoff["url"] == PREPARE_URL
+    assert len(handoff["options"]) == 2
 
 
-def test_optimism_source_only_zero_fee_quote_ok():
-    q = valid_quote("optimism", "USDC", "arbitrum", "USDC", 100, source_only=True, fee=0)
+def test_optimism_source_only_one_fee_quote_ok():
+    q = valid_quote("optimism", "USDC", "arbitrum", "USDC", 100, source_only=True, fee=1)
     out = client({"/v2/quote": q}).get_quote("optimism", "USDC", "arbitrum", "USDC", 100)
-    assert out["assetfare_fee_bps"] == 0
-    assert out["fee_collection_steps"] == []
-    assert out["fee_collectible_now"] is False
+    assert out["assetfare_fee_bps"] == 1
+    assert out["fee_collection_steps"] == [0]
+    assert out["fee_collectible_now"] is True
 
 
-def test_source_only_quote_with_prepare_url_rejected():
-    # A source-only route that (wrongly) carries an executable handoff must be rejected.
+def test_source_only_quote_without_prepare_url_rejected():
     q = valid_quote("polygon", "USDC", "base", "USDC", 100, source_only=True, fee=1)
-    q["caller_action_plan_handoff"] = executable_handoff()
+    q["caller_action_plan_handoff"].pop("url")
     with pytest.raises(AssetFareError):
         client({"/v2/quote": q}).get_quote("polygon", "USDC", "base", "USDC", 100)
 
 
 def test_executable_quote_with_blocked_handoff_rejected():
     q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    q["caller_action_plan_handoff"] = blocked_handoff()  # available:false on an executable route
+    q["caller_action_plan_handoff"]["available"] = False
     with pytest.raises(AssetFareError):
         client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
@@ -599,15 +559,15 @@ def test_quote_fee_exact_zero_or_one(mut):
         client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
-def test_source_only_fee_collectible_now_true_rejected():
+def test_source_only_fee_collectible_now_false_rejected():
     q = valid_quote("polygon", "USDC", "base", "USDC", 100, source_only=True, fee=1)
-    q["offer"]["fee_collectible_now"] = True  # cannot be collectible while blocked
+    q["offer"]["fee_collectible_now"] = False
     with pytest.raises(AssetFareError):
         client({"/v2/quote": q}).get_quote("polygon", "USDC", "base", "USDC", 100)
 
 
 # ---- route enumeration ----
-def test_all_76_routes_generated_72_executable():
+def test_all_76_routes_generated_and_executable():
     routes = all_routes()
     assert len(routes) == 76
     executable = [r for r in routes if r[0] not in SOURCE_ONLY_CHAINS]
@@ -678,9 +638,11 @@ def test_prepare_caller_approved_gate(approved):
         client({}).prepare(approved, "solana", "SOL", "base", "ETH", 100, wallets_for("solana", "base"))
 
 
-def test_prepare_source_only_rejected_before_network():
-    with pytest.raises(AssetFareError):
-        client({}).prepare(True, "polygon", "USDC", "base", "USDC", 100, wallets_for("polygon", "base"))
+def test_prepare_source_only_execution_ready():
+    c, up = stateful()
+    bundle = c.prepare(True, "polygon", "USDC", "base", "USDC", 100, wallets_for("polygon", "base"))
+    assert bundle["signed"] is False and bundle["submitted"] is False
+    assert ("POST", "/v2/prepare") in up.calls
 
 
 @pytest.mark.parametrize(
@@ -812,14 +774,13 @@ def test_session_create_caller_approved_gate():
     assert up.calls == []  # gate before network
 
 
-def test_session_create_source_only_rejected_before_network():
+def test_session_create_source_only_execution_ready():
     c, up = stateful()
     cap = new_session_capability()["session_token"]
-    with pytest.raises(AssetFareError):
-        c.session_create(
-            True, "polygon", "USDC", "base", "USDC", 25, wallets_for("polygon", "base"), cap, "k"
-        )
-    assert up.calls == []
+    created = c.session_create(
+        True, "polygon", "USDC", "base", "USDC", 25, wallets_for("polygon", "base"), cap, "source-key"
+    )
+    assert created["status"] == "action_ready"
 
 
 def test_session_expired_refresh_recovers():
@@ -847,24 +808,13 @@ def test_invalid_session_token_format_rejected():
         c.session_get(new_session_capability()["session_token"], "not-a-uuid")
 
 
-# ---- 76-route multi-step MOCK e2e matrix: 72 complete, 4 blocked (phase B) ----
-def test_e2e_76_route_matrix_72_complete_4_blocked():
+# ---- 76-route multi-step MOCK e2e matrix: all 76 complete ------------------
+def test_e2e_76_route_matrix_all_complete():
     c, up = stateful()
     completed = 0
-    blocked = 0
     for i, (fc, ft, tc, tt) in enumerate(all_routes()):
         tag = "{:03d}".format(i)
         wallets = wallets_for(fc, tc)
-        if fc in SOURCE_ONLY_CHAINS:
-            # Source-only routes must be fail-closed at prepare AND session create.
-            with pytest.raises(AssetFareError):
-                c.prepare(True, fc, ft, tc, tt, 10, wallets)
-            with pytest.raises(AssetFareError):
-                c.session_create(
-                    True, fc, ft, tc, tt, 10, wallets, new_session_capability()["session_token"], f"blocked-{tag}"
-                )
-            blocked += 1
-            continue
         cap = new_session_capability()["session_token"]
         created = c.session_create(True, fc, ft, tc, tt, 10, wallets, cap, f"matrix-{tag}")
         sid = created["session_id"]
@@ -872,5 +822,4 @@ def test_e2e_76_route_matrix_72_complete_4_blocked():
         out = c.observe_output(cap, sid, f"output-{tag}")
         assert out["status"] == "complete"
         completed += 1
-    assert completed == 72
-    assert blocked == 4
+    assert completed == 76

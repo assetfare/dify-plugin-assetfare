@@ -50,9 +50,8 @@ _CHAINS = ("arbitrum", "base", "optimism", "polygon", "robinhood", "solana")
 # the source-only chains.
 _DESTINATION_CHAINS = frozenset({"solana", "base", "arbitrum", "robinhood"})
 # Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
-# are never a destination, and they are NOT execution-ready this phase (future
-# Phase B): their quotes carry execution.supported=false and a blocked handoff,
-# and prepare/session are fail-closed rejected before any network call.
+# are never a destination. Their four directional corridors are execution-ready
+# through the same caller-approved, non-custodial handoff as every other route.
 _SOURCE_ONLY_CHAINS = frozenset({"optimism", "polygon"})
 _ENDPOINTS = frozenset(
     {
@@ -79,15 +78,14 @@ _SOURCE_ONLY_ROUTES = frozenset(
     }
 )
 _EXPECTED_ROUTES = 76  # directed quote-discovery routes (6-chain surface)
-_EXECUTION_READY_ROUTES = 72  # four-chain routes that expose an executable action plan
-_PHASE_B_BLOCKED_ROUTES = 4  # source-only routes (polygon/optimism) blocked this phase
+_EXECUTION_READY_ROUTES = 76
+_PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
 _MAX_USD = 1000.0
 
 # ---- Caller-operated non-custodial v2 action contract (fixed origin) --------
 _PREPARE_URL = "https://api.assetfare.dev/v2/prepare"
 _SESSION_URL = "https://api.assetfare.dev/v2/session"
-_EXECUTION_NOT_READY = "execution_not_ready_phase_b"
 _FEE_COLLECTION_CONST = "only_on_eligible_successful_executor_step"
 _SESSION_TOKEN_HEADER = "X-AssetFare-Session-Token"
 # EXACT 8-field request contract (caller_approved first). Any deviation fails closed.
@@ -369,7 +367,7 @@ class AssetFareClient:
             _fail("assetfare_safety_boundary_failed")
 
     @staticmethod
-    def _validate_caller_handoff(node: Any, source_only: bool) -> dict[str, Any]:
+    def _validate_caller_handoff(node: Any) -> dict[str, Any]:
         """FAIL-CLOSED passthrough of the upstream caller_action_plan_handoff.
 
         There is NO local fallback: a missing / null / array / extra-field /
@@ -405,15 +403,6 @@ class AssetFareClient:
         for key in node:
             if key not in _HANDOFF_ALLOWED_KEYS:
                 _fail("assetfare_handoff_extra_field")
-
-        if source_only:
-            if node.get("available") is not False:
-                _fail("assetfare_handoff_invalid")
-            if node.get("blocker") != _EXECUTION_NOT_READY:
-                _fail("assetfare_handoff_invalid")
-            if "url" in node or "options" in node:
-                _fail("assetfare_handoff_source_only_offers_prepare")
-            return dict(node)
 
         if node.get("available") is not True:
             _fail("assetfare_handoff_invalid")
@@ -460,7 +449,7 @@ class AssetFareClient:
         return dict(node)
 
     @staticmethod
-    def _validate_offer_fee(offer: dict[str, Any], step_count: int, source_only: bool) -> None:
+    def _validate_offer_fee(offer: dict[str, Any], step_count: int) -> None:
         """Fee EXACTLY {0,1}bp, collected at most once on an eligible successful step.
 
         fee=1 => fee_collection_steps holds EXACTLY one valid, in-range, non-duplicate
@@ -478,8 +467,8 @@ class AssetFareClient:
             _fail("assetfare_fee_invalid")
         if not isinstance(offer.get("fee_collectible_now"), bool):
             _fail("assetfare_fee_invalid")
-        if source_only and offer.get("fee_collectible_now") is not False:
-            _fail("assetfare_fee_collectible_while_blocked")
+        if modeled != fee or offer.get("fee_collectible_now") is not (fee == 1):
+            _fail("assetfare_fee_collectibility_mismatch")
         steps = offer.get("fee_collection_steps")
         if not isinstance(steps, list) or not all(_int(s) for s in steps):
             _fail("assetfare_fee_invalid")
@@ -521,8 +510,7 @@ class AssetFareClient:
         status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
-        # Quote discovery spans all 76 routes; execution is ready for 72 (four-chain),
-        # with exactly 4 source-only routes blocked (future Phase B).
+        # All 76 directed routes are caller-approved and execution-ready.
         if (
             caps.get("directed_conversion_routes") != _EXPECTED_ROUTES
             or caps.get("unsigned_route_plans_ready") != _EXPECTED_ROUTES
@@ -565,11 +553,7 @@ class AssetFareClient:
         ):
             _fail("assetfare_safety_boundary_failed")
         blocked = caps.get("blocked_source_only_routes")
-        if (
-            not isinstance(blocked, list)
-            or len(blocked) != len(_SOURCE_ONLY_ROUTES)
-            or set(blocked) != _SOURCE_ONLY_ROUTES
-        ):
+        if not isinstance(blocked, list) or blocked:
             _fail("assetfare_safety_boundary_failed")
         return {
             "status": caps["status"],
@@ -581,7 +565,7 @@ class AssetFareClient:
             "phase_b_blocked_routes": _PHASE_B_BLOCKED_ROUTES,
             "source_only_asset_endpoints": sorted(f"{c}:{t}" for (c, t) in _SOURCE_ONLY_ENDPOINTS),
             "source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
-            "blocked_source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
+            "blocked_source_only_routes": [],
             "amount_usd_min": _MIN_USD,
             "amount_usd_max": _MAX_USD,
             "quote_only_discovery": True,
@@ -685,7 +669,7 @@ class AssetFareClient:
         if offer.get("output_symbol") != to_u:
             _fail("assetfare_response_invalid")
         # Fee EXACTLY {0,1}bp + modeled/collectible + fee_collection literal.
-        self._validate_offer_fee(offer, len(steps), source_only)
+        self._validate_offer_fee(offer, len(steps))
         fee = offer["assetfare_fee_bps"]
         fee_steps = offer["fee_collection_steps"]
         eta = offer.get("estimated_time_seconds")
@@ -699,39 +683,25 @@ class AssetFareClient:
             _fail("assetfare_response_invalid")
         self._no_sign(risk)
 
-        # execution: discriminated by route class (Phase-B split). Source-only routes
-        # must be NOT execution-ready; executable routes must be ready.
+        # Every supported route is execution-ready through caller-operated wallets.
         if not isinstance(execution.get("first_unsigned_action_supported"), bool):
             _fail("assetfare_response_invalid")
         if execution.get("future_actions_require_verified_receipts") is not True:
             _fail("assetfare_response_invalid")
-        if source_only:
-            if (
-                execution.get("supported") is not False
-                or execution.get("first_unsigned_action_supported") is not False
-                or execution.get("blocker") != _EXECUTION_NOT_READY
-            ):
-                _fail("assetfare_execution_boundary_failed")
-        else:
-            if execution.get("supported") is not True or execution.get("first_unsigned_action_supported") is not True:
-                _fail("assetfare_execution_boundary_failed")
+        if (
+            execution.get("supported") is not True
+            or execution.get("first_unsigned_action_supported") is not True
+            or ("blocker" in execution and execution.get("blocker") is not None)
+        ):
+            _fail("assetfare_execution_boundary_failed")
 
         # FAIL-CLOSED passthrough of the upstream caller_action_plan_handoff. No
         # local fallback: a missing/malformed handoff is a real contract regression.
-        caller_action_plan_handoff = self._validate_caller_handoff(
-            data.get("caller_action_plan_handoff"), source_only
-        )
+        caller_action_plan_handoff = self._validate_caller_handoff(data.get("caller_action_plan_handoff"))
 
-        # The AssetFare fee is conditional and, for source-only routes, not collectible
-        # this phase. Surface fee_collection_steps and an explicit note rather than a flat
-        # unconditional fee.
+        # The AssetFare fee is conditional on the eligible successful executor step.
         fee_steps_out = [int(s) for s in fee_steps]
-        if source_only:
-            fee_note = (
-                f"AssetFare models {fee}bp for this source-only route, but it is NOT collectible now "
-                "(execution_not_ready_phase_b); no prepare/session action is offered."
-            )
-        elif fee > 0:
+        if fee > 0:
             fee_note = (
                 f"AssetFare {fee}bp is collected only on an eligible successful executor step "
                 "(conditional, not an unconditional flat fee)."
@@ -761,8 +731,8 @@ class AssetFareClient:
             "as_of": as_of,
             "ttl_seconds": ttl,
             "source_only": source_only,
-            "execution_supported": not source_only,
-            "execution_blocker": _EXECUTION_NOT_READY if source_only else None,
+            "execution_supported": True,
+            "execution_blocker": None,
             "server_signs_or_submits": False,
             "caller_action_plan_handoff": caller_action_plan_handoff,
         }
@@ -783,7 +753,7 @@ class AssetFareClient:
 
         Enforces the literal caller_approved gate, the route endpoints, the public
         wallet map (no private keys/seeds/signed material), the conditional
-        event_signer_public, and the source-only Phase-B block. Fails closed.
+        event_signer_public, and directional source-only corridor constraints. Fails closed.
         """
         # Machine approval gate: literal True only (reject false/missing/string/number).
         if caller_approved is not True:
@@ -795,10 +765,10 @@ class AssetFareClient:
             _fail("assetfare_identity_route_rejected")
         if to_chain in _SOURCE_ONLY_CHAINS:
             _fail("assetfare_destination_endpoint_invalid")
-        # Source-only routes are NOT execution-ready this phase: fail closed BEFORE
-        # any network call; never offer/call prepare or session for them.
-        if from_chain in _SOURCE_ONLY_CHAINS:
-            _fail(_EXECUTION_NOT_READY)
+        if from_chain in _SOURCE_ONLY_CHAINS and not (
+            from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"
+        ):
+            _fail("assetfare_source_endpoint_invalid")
         # Reject any private key / seed / signed material anywhere in the intent.
         _reject_secret_material(
             {
@@ -904,8 +874,8 @@ class AssetFareClient:
         """Explicit caller-approved one-shot POST /v2/prepare.
 
         Returns the fresh re-quoted bounded FIRST unsigned action bundle. NEVER
-        auto-called from a quote; rejects source-only Phase-B routes and any private
-        key / seed / signed transaction. AssetFare never signs or submits.
+        auto-called from a quote; rejects private key / seed / signed transaction
+        material. AssetFare never signs or submits.
         """
         body = self._action_intent(
             caller_approved, from_chain, from_token, to_chain, to_token, amount_usd, wallets, event_signer_public

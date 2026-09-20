@@ -12,24 +12,22 @@ wallet, outside this plugin.
 ## The six-chain surface
 
 Six source chains, eleven `(chain, token)` source endpoints, and **76 directed
-routes** for quote discovery. Of these, **72 four-chain routes** (Solana, Base,
-Arbitrum, Robinhood) are execution-ready. Polygon (models 1bp) and Optimism
-(0bp) are native-USDC **source-only** to Base/Arbitrum and are **not
-execution-ready this phase** (`execution_not_ready_phase_b`): their quotes carry
-`execution.supported=false` and an `available:false` action-plan handoff with no
-prepare URL, so the plugin never offers or calls prepare/session for them.
+routes**, all execution-ready through caller-operated wallets. Polygon and
+Optimism each use an audited 1bp executor and are directional native-USDC
+**source-only** origins to Base/Arbitrum; they expose the same explicit
+caller-approved action-plan handoff as the other 72 routes.
 
 ## Tools
 
 Discovery (read-only):
 
-- `assetfare_capabilities` — the chains, endpoints, 76 routes, the 72/4
-  execution split, source-only constraints, and confirmation the server cannot
+- `assetfare_capabilities` — the chains, endpoints, all 76 execution-ready
+  routes, source-only constraints, and confirmation the server cannot
   sign or submit. No parameters.
 - `assetfare_quote` — one fresh, fee-inclusive quote in the USD 1–1,000 band. It
   surfaces AssetFare's `caller_action_plan_handoff` **fail-closed**: an executable
   route carries two options (one-shot `POST /v2/prepare`, or the full
-  `POST /v2/session` lifecycle); a source-only route carries `available:false`.
+  `POST /v2/session` lifecycle), including the four directional source-only routes.
 
 Caller-approved, non-custodial action (each requires an explicit
 `caller_approved: true`; **never auto-called from a quote**):
@@ -54,8 +52,8 @@ Caller-approved, non-custodial action (each requires an explicit
 - `assetfare_refresh_action` — replace an expired, unsubmitted action with a
   fresh quote-bound unsigned action.
 
-The prepare/session tools reject source-only Phase-B routes, and reject any
-private key, seed, signed transaction, or other secret material anywhere in the
+The prepare/session tools reject any private key, seed, signed transaction, or
+other secret material anywhere in the
 input. They never sign, submit, or auto-chain.
 
 ## Setup

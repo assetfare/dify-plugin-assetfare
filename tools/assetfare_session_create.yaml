@@ -8,7 +8,7 @@ description:
   human:
     en_US: On explicit caller approval, POST /v2/session to open one idempotent, receipt-driven session for an execution-ready route and return its first unsigned action. Never signs or submits.
     zh_Hans: 在调用方明确批准后，调用 /v2/session 为执行就绪路由创建一个幂等、凭据驱动的会话并返回首步未签名操作。绝不签名或提交。
-  llm: Explicit caller-approved full-lifecycle create. Only after the caller EXPLICITLY approves a specific execution-ready route, POST the fixed-origin /v2/session to open one idempotent receipt-driven session and return its first unsigned action. Requires caller_approved literally true, the route's exact PUBLIC wallet map, a caller-generated session_token (from assetfare_new_session_capability; sent in the X-AssetFare-Session-Token header), and an idempotency_key. Retrying with the SAME token and idempotency_key recovers the SAME session (lost-response recovery). Never auto-call from a quote; never auto-chain; source-only routes are rejected; never pass a private key, seed, or signed transaction. AssetFare never signs or submits.
+  llm: Explicit caller-approved full-lifecycle create. Only after the caller EXPLICITLY approves a specific execution-ready route, POST the fixed-origin /v2/session to open one idempotent receipt-driven session and return its first unsigned action. Requires caller_approved literally true, the route's exact PUBLIC wallet map, a caller-generated session_token (from assetfare_new_session_capability; sent in the X-AssetFare-Session-Token header), and an idempotency_key. Retrying with the SAME token and idempotency_key recovers the SAME session (lost-response recovery). Never auto-call from a quote; never auto-chain; never pass a private key, seed, or signed transaction. AssetFare never signs or submits.
 parameters:
   - name: caller_approved
     type: boolean
@@ -23,12 +23,14 @@ parameters:
     form: llm
     label: {en_US: Source chain, zh_Hans: 源链}
     human_description: {en_US: The source chain., zh_Hans: 源链。}
-    llm_description: source chain, one of solana, base, arbitrum, robinhood
+    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism
     options:
       - {value: solana, label: {en_US: solana, zh_Hans: solana}}
       - {value: base, label: {en_US: base, zh_Hans: base}}
       - {value: arbitrum, label: {en_US: arbitrum, zh_Hans: arbitrum}}
       - {value: robinhood, label: {en_US: robinhood, zh_Hans: robinhood}}
+      - {value: polygon, label: {en_US: polygon, zh_Hans: polygon}}
+      - {value: optimism, label: {en_US: optimism, zh_Hans: optimism}}
   - name: from_token
     type: select
     required: true
