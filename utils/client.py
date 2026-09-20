@@ -449,6 +449,49 @@ class AssetFareClient:
         return dict(node)
 
     @staticmethod
+    def _validate_caller_handoff_v2(node: Any) -> dict[str, Any]:
+        """FAIL-CLOSED EXACT validation of the optional caller_action_plan_handoff_v2 sibling. Advisory machine
+        contract: per-kind EXACT option key sets (missing AND extra rejected), nonempty option notes, and exact
+        session lifecycle. v1 stays the unchanged old shape; this is validated only when the sibling is present."""
+        if not isinstance(node, dict):
+            _fail("assetfare_handoff_v2_invalid")
+        if node.get("request_fields") != _HANDOFF_REQUEST_FIELDS:
+            _fail("assetfare_handoff_v2_request_fields_invalid")
+        scalars = {"schema_version": 2, "kind": "caller_operated_rest_prepare", "method": "POST", "requires_explicit_caller_approval": True, "requires_public_wallet_addresses": True, "assetfare_server_signing": False, "assetfare_server_submission": False, "caller_must_verify_sign_and_submit": True, "requires_fresh_requote": True, "automatic_prepare_call_forbidden": True, "selection": "choose_exactly_one", "mutually_exclusive": True, "do_not_call_both": True, "selection_before_signing": True, "once_any_action_submitted_do_not_start_other_mode": True, "enforcement": "advisory_caller_side", "available": True, "url": _PREPARE_URL}
+        for key, val in scalars.items():
+            if node.get(key) != val:
+                _fail("assetfare_handoff_v2_invalid")
+        if not isinstance(node.get("note"), str) or not node["note"]:
+            _fail("assetfare_handoff_v2_invalid")
+        top_required = {"kind", "url", "method", "request_fields", "assetfare_server_signing", "assetfare_server_submission", "caller_must_verify_sign_and_submit", "requires_fresh_requote", "automatic_prepare_call_forbidden", "requires_explicit_caller_approval", "requires_public_wallet_addresses", "schema_version", "selection", "mutually_exclusive", "do_not_call_both", "selection_before_signing", "once_any_action_submitted_do_not_start_other_mode", "enforcement", "options", "note", "available"}
+        # v2 is ALWAYS the available=true machine contract: EXACT key set (no blocker) — reject missing AND extra.
+        if set(node) != top_required:
+            _fail("assetfare_handoff_v2_extra_field")
+        options = node.get("options")
+        if not isinstance(options, list) or len(options) != 2:
+            _fail("assetfare_handoff_v2_options_invalid")
+        prepare_option, session_option = options
+        prep_keys = {"kind", "method", "url", "requires_explicit_caller_approval", "requires_public_wallet_addresses", "assetfare_never_signs_submits_or_auto_calls", "preview_or_manual_first_action_only", "not_a_session", "do_not_start_session_after_submission", "note"}
+        if not isinstance(prepare_option, dict) or set(prepare_option) != prep_keys:
+            _fail("assetfare_handoff_v2_prepare_option_invalid")
+        if (prepare_option.get("kind") != "one_shot_first_unsigned_bundle" or prepare_option.get("method") != "POST" or prepare_option.get("url") != _PREPARE_URL or prepare_option.get("requires_explicit_caller_approval") is not True or prepare_option.get("requires_public_wallet_addresses") is not True or prepare_option.get("assetfare_never_signs_submits_or_auto_calls") is not True or prepare_option.get("preview_or_manual_first_action_only") is not True or prepare_option.get("not_a_session") is not True or prepare_option.get("do_not_start_session_after_submission") is not True or not isinstance(prepare_option.get("note"), str) or not prepare_option["note"]):
+            _fail("assetfare_handoff_v2_prepare_option_invalid")
+        sess_keys = {"kind", "method", "url", "lifecycle_urls", "requires_explicit_caller_approval", "requires_public_wallet_addresses", "assetfare_never_signs_submits_or_auto_calls", "recommended_for_multistep", "note"}
+        if not isinstance(session_option, dict) or set(session_option) != sess_keys:
+            _fail("assetfare_handoff_v2_session_option_invalid")
+        if (session_option.get("kind") != "caller_approved_full_workflow_session" or session_option.get("method") != "POST" or session_option.get("url") != _SESSION_URL or session_option.get("requires_explicit_caller_approval") is not True or session_option.get("requires_public_wallet_addresses") is not True or session_option.get("assetfare_never_signs_submits_or_auto_calls") is not True or session_option.get("recommended_for_multistep") is not True or not isinstance(session_option.get("note"), str) or not session_option["note"]):
+            _fail("assetfare_handoff_v2_session_option_invalid")
+        lifecycle = session_option.get("lifecycle_urls")
+        expected_lifecycle = {"create": ("POST", _SESSION_URL), "read": ("GET", f"{_SESSION_URL}/{{session_id}}"), "observe_source": ("POST", f"{_SESSION_URL}/{{session_id}}/observe-source"), "observe_output": ("POST", f"{_SESSION_URL}/{{session_id}}/observe-output"), "refresh_action": ("POST", f"{_SESSION_URL}/{{session_id}}/refresh-action")}
+        if not isinstance(lifecycle, dict) or set(lifecycle) != set(expected_lifecycle):
+            _fail("assetfare_handoff_v2_session_lifecycle_invalid")
+        for name, (method, url) in expected_lifecycle.items():
+            entry = lifecycle.get(name)
+            if not isinstance(entry, dict) or set(entry) != {"method", "url"} or entry.get("method") != method or entry.get("url") != url:
+                _fail("assetfare_handoff_v2_session_lifecycle_invalid")
+        return dict(node)
+
+    @staticmethod
     def _validate_offer_fee(offer: dict[str, Any], step_count: int) -> None:
         """Fee EXACTLY 1bp, collected once on an eligible successful atomic action.
 
@@ -696,6 +739,19 @@ class AssetFareClient:
         # FAIL-CLOSED passthrough of the upstream caller_action_plan_handoff. No
         # local fallback: a missing/malformed handoff is a real contract regression.
         caller_action_plan_handoff = self._validate_caller_handoff(data.get("caller_action_plan_handoff"))
+        # Transition-safe v2 sibling: v1 is always validated; the sibling and its schema_version are strictly coupled
+        # (both present or both absent). A rollback Core (v1-only) still quotes.
+        # Coupling by KEY PRESENCE (not value): both keys present or both absent. A present-but-null/array sibling is
+        # rejected by the validator (isinstance dict check), not treated as absent.
+        has_version = "handoff_schema_version" in data
+        has_sibling = "caller_action_plan_handoff_v2" in data
+        if has_version != has_sibling:
+            _fail("assetfare_handoff_schema_version_invalid")
+        caller_action_plan_handoff_v2 = None
+        if has_sibling:
+            if data.get("handoff_schema_version") != 2:
+                _fail("assetfare_handoff_schema_version_invalid")
+            caller_action_plan_handoff_v2 = self._validate_caller_handoff_v2(data.get("caller_action_plan_handoff_v2"))
 
         # The AssetFare fee is conditional on the eligible successful executor step.
         fee_steps_out = [int(s) for s in fee_steps]
@@ -727,6 +783,8 @@ class AssetFareClient:
             "execution_blocker": None,
             "server_signs_or_submits": False,
             "caller_action_plan_handoff": caller_action_plan_handoff,
+            "caller_action_plan_handoff_v2": caller_action_plan_handoff_v2,
+            "handoff_schema_version": 2 if caller_action_plan_handoff_v2 is not None else None,
         }
 
     # ---- caller-approved action intent helpers ----

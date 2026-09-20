@@ -147,6 +147,27 @@ def executable_handoff():
     }
 
 
+def prepare_option_v2():
+    return {**prepare_option(), "preview_or_manual_first_action_only": True, "not_a_session": True, "do_not_start_session_after_submission": True}
+
+
+def session_option_v2():
+    return {**session_option(), "recommended_for_multistep": True}
+
+
+def executable_handoff_v2():
+    return {
+        "kind": "caller_operated_rest_prepare", "url": PREPARE_URL, "method": "POST",
+        "requires_explicit_caller_approval": True, "requires_public_wallet_addresses": True,
+        "request_fields": list(REQUEST_FIELDS), "assetfare_server_signing": False, "assetfare_server_submission": False,
+        "caller_must_verify_sign_and_submit": True, "requires_fresh_requote": True, "automatic_prepare_call_forbidden": True,
+        "schema_version": 2, "selection": "choose_exactly_one", "mutually_exclusive": True, "do_not_call_both": True,
+        "selection_before_signing": True, "once_any_action_submitted_do_not_start_other_mode": True,
+        "enforcement": "advisory_caller_side", "options": [prepare_option_v2(), session_option_v2()],
+        "note": "Machine-readable v2.", "available": True,
+    }
+
+
 def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
     steps = [{"kind": "burn"}]
     offer_fee = fee
@@ -194,6 +215,8 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
         },
         "execution": execution,
         "caller_action_plan_handoff": handoff,
+        "caller_action_plan_handoff_v2": executable_handoff_v2(),
+        "handoff_schema_version": 2,
     }
 
 
@@ -460,6 +483,57 @@ def test_quote_surfaces_executable_dual_option_handoff():
     assert handoff["options"][1]["kind"] == "caller_approved_full_workflow_session"
     assert handoff["requires_fresh_requote"] is True
     assert handoff["automatic_prepare_call_forbidden"] is True
+    # v1 stays old-exact: NO machine fields on the v1 handoff.
+    assert not ({"selection", "mutually_exclusive", "do_not_call_both", "enforcement", "schema_version"} & set(handoff))
+
+
+def test_quote_surfaces_v2_sibling():
+    q = valid_quote("solana", "SOL", "base", "ETH", 250)
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+    v2 = out["caller_action_plan_handoff_v2"]
+    assert out["handoff_schema_version"] == 2 and v2["schema_version"] == 2
+    assert v2["selection"] == "choose_exactly_one" and v2["mutually_exclusive"] is True
+    assert v2["do_not_call_both"] is True and v2["enforcement"] == "advisory_caller_side"
+    assert v2["options"][0]["preview_or_manual_first_action_only"] is True and v2["options"][0]["not_a_session"] is True
+    assert v2["options"][1]["recommended_for_multistep"] is True
+
+
+def test_rollback_core_no_v2_still_quotes():
+    q = valid_quote("solana", "SOL", "base", "ETH", 250)
+    q.pop("caller_action_plan_handoff_v2")
+    q.pop("handoff_schema_version")
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+    assert out["caller_action_plan_handoff_v2"] is None and out["handoff_schema_version"] is None
+    assert out["caller_action_plan_handoff"]["available"] is True
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q.pop("caller_action_plan_handoff_v2"),  # orphan version
+        lambda q: q.pop("handoff_schema_version"),  # orphan sibling
+        lambda q: q.update(caller_action_plan_handoff_v2=None),  # null sibling with version
+        lambda q: q.update(handoff_schema_version=3),  # wrong top version
+        lambda q: q["caller_action_plan_handoff_v2"].update(schema_version=1),  # wrong sibling version
+        lambda q: q["caller_action_plan_handoff_v2"].pop("do_not_call_both"),  # missing machine field
+        lambda q: q["caller_action_plan_handoff_v2"].update(enforcement="server_enforced"),  # overclaim
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].pop("note"),  # option missing note
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].pop("not_a_session"),  # option missing required
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].update(recommended_for_multistep=True),  # cross-field
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"].pop("create"),  # missing lifecycle
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"]["create"].update(url="https://api.assetfare.dev/v2/evil"),  # arbitrary lifecycle
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"]["create"].pop("method"),  # lifecycle missing method
+        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"].update(extra={"method": "POST", "url": SESSION_URL}),  # extra lifecycle
+        lambda q: (q.update(caller_action_plan_handoff_v2=None), q.pop("handoff_schema_version")),  # null sibling without version key
+        lambda q: q.update(caller_action_plan_handoff_v2=[]),  # array sibling (version present)
+        lambda q: q["caller_action_plan_handoff_v2"].update(blocker=None),  # v2 must be exact: no blocker key
+    ],
+)
+def test_quote_v2_sibling_malformed_rejected(mut):
+    q = valid_quote("solana", "SOL", "base", "ETH", 250)
+    mut(q)
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
 # ---- FAIL-CLOSED handoff (no local fallback) ----
