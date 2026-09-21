@@ -1,4 +1,5 @@
 .git/
+.git
 .gitignore
 .github/
 __pycache__/
