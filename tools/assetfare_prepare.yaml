@@ -95,9 +95,9 @@ parameters:
     form: llm
     label: {en_US: Event signer public key (Solana CCTP only), zh_Hans: 事件签名者公钥（仅 Solana CCTP）}
     human_description:
-      en_US: Only for Solana CCTP routes. A PUBLIC key, never a private key.
-      zh_Hans: 仅用于 Solana CCTP 路由。为公钥，绝非私钥。
-    llm_description: optional; provide only for Solana CCTP routes that require it; a PUBLIC key/address only, never a private key or seed
+      en_US: Solana CCTP only. Generate a fresh ephemeral Solana keypair locally, send only its PUBLIC key, keep the private key client-side, and co-sign the returned unsigned event-account transaction.
+      zh_Hans: 仅用于 Solana CCTP。在本地生成新的临时 Solana 密钥对，仅发送公钥，私钥保留在客户端并用于共同签署返回的未签名事件账户交易。
+    llm_description: Solana CCTP only; generate a fresh ephemeral keypair locally, provide only its public key, keep the private key client-side, and use it to co-sign the returned unsigned event-account transaction
 extra:
   python:
     source: tools/assetfare_prepare.py
