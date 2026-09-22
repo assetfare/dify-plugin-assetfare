@@ -74,6 +74,11 @@ def valid_caps():
         "directed_conversion_routes": 76,
         "unsigned_route_plans_ready": 76,
         "execution_ready_routes": 76,
+        "execution_implemented_routes": 76,
+        "currently_prepare_ready_routes": 76,
+        "temporarily_unavailable_routes": [],
+        "temporarily_unavailable_route_count": 0,
+        "execution_availability": {"status":"available","provider":"circle_iris","provider_dependent_routes":50,"recent_fee_snapshot_usable":True,"guarantees_future_availability":False},
         "phase_b_blocked_routes": 0,
         "server_signing": False,
         "server_submission": False,
@@ -218,6 +223,14 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
         "caller_action_plan_handoff_v2": executable_handoff_v2(),
         "handoff_schema_version": 2,
     }
+
+
+def with_cost_summary(quote):
+    amount=float(quote["intent"]["amount_usd"]);expected=float(quote["offer"]["expected_receive_usd"]);minimum=float(quote["offer"]["estimated_min_receive_usd"])
+    ec=max(0.0,amount-expected);mc=max(0.0,amount-minimum)
+    quote["cost_summary"]={"scope":"token_path_only_network_gas_excluded","input_value_usd":amount,"expected_receive_value_usd":expected,"minimum_receive_value_usd":minimum,"expected_total_cost_usd":ec,"maximum_total_cost_usd":mc,"expected_total_cost_percent":ec/amount*100,"maximum_total_cost_percent":mc/amount*100,"assetfare_service_fee":{"bps":1,"estimated_usd":min(amount/10_000,5.0),"included_in_receive_amount":True,"note":"service fee only"},"provider_fee_components":[],"unpriced_costs":["source_chain_network_fee"],"rankable_all_in":False,"small_amount_warning":mc/amount>=.01,"warning":None}
+    quote["eta"]={"estimated_time_seconds":quote["offer"]["estimated_time_seconds"],"estimated_time_range_seconds":[8,23],"complete_route_estimate":True,"sources":[],"note":"estimate"}
+    return quote
 
 
 class _Resp:
@@ -423,6 +436,7 @@ def test_capabilities_ok():
     assert caps["directed_conversion_routes"] == 76
     assert caps["unsigned_route_plans_ready"] == 76
     assert caps["execution_ready_routes"] == 76
+    assert caps["currently_prepare_ready_routes"] == 76
     assert caps["phase_b_blocked_routes"] == 0
     assert len(caps["asset_endpoints"]) == 11
     assert caps["server_signs_or_submits"] is False
@@ -454,20 +468,46 @@ def test_capabilities_boundary_fail(mut):
         client({"/v2/capabilities": caps, "/v2/status": valid_status()}).get_capabilities()
 
 
+def test_capabilities_partial_live_availability_fails_closed():
+    caps=valid_caps();caps.pop("execution_availability")
+    with pytest.raises(AssetFareError):client({"/v2/capabilities":caps,"/v2/status":valid_status()}).get_capabilities()
+
+
 # ---- quote happy path + fee surfaced ----
 def test_quote_exact_body_and_bounded_return():
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
     c = client({"/v2/quote": q})
     out = c.get_quote("solana", "SOL", "base", "ETH", 250)
     assert out["from"] == "solana:SOL" and out["to"] == "base:ETH"
     assert out["assetfare_fee_bps"] == 1
     assert out["fee_modeled_bps"] == 1
     assert out["fee_collectible_now"] is True
+    assert out["cost_summary"]["maximum_total_cost_usd"] == pytest.approx(.02)
+    assert out["cost_summary"]["assetfare_service_fee"]["bps"] == 1
+    assert out["eta"]["estimated_time_seconds"] == 23
     assert out["fee_collection"] == "only_on_eligible_successful_executor_step"
     assert out["fee_collection_steps"] == [0]
     assert out["execution_supported"] is True
     assert out["source_only"] is False
     assert out["server_signs_or_submits"] is False
+
+
+@pytest.mark.parametrize("mut",[
+    lambda q:q["cost_summary"].__setitem__("maximum_total_cost_usd",.5),
+    lambda q:q["cost_summary"]["assetfare_service_fee"].__setitem__("estimated_usd",1),
+    lambda q:q["cost_summary"].__setitem__("rankable_all_in",True),
+    lambda q:q["eta"].__setitem__("estimated_time_seconds",99),
+])
+def test_quote_cost_and_eta_binding_hostiles(mut):
+    q=with_cost_summary(valid_quote("solana","SOL","base","ETH",250));mut(q)
+    with pytest.raises(AssetFareError):client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
+
+
+def test_rollback_core_without_cost_derives_honest_total():
+    q=valid_quote("solana","SOL","base","ETH",250)
+    out=client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
+    assert out["cost_summary"]["scope"]=="token_path_only_network_gas_excluded"
+    assert "provider_fee_breakdown_unavailable_legacy_core" in out["cost_summary"]["unpriced_costs"]
 
 
 def test_quote_surfaces_executable_dual_option_handoff():

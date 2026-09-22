@@ -596,6 +596,15 @@ class AssetFareClient:
         blocked = caps.get("blocked_source_only_routes")
         if not isinstance(blocked, list) or blocked:
             _fail("assetfare_safety_boundary_failed")
+        availability_keys={"execution_implemented_routes","currently_prepare_ready_routes","temporarily_unavailable_routes","temporarily_unavailable_route_count","execution_availability"}
+        present=availability_keys & set(caps)
+        if present and present!=availability_keys:
+            _fail("assetfare_current_availability_invalid")
+        current_ready=None;temporary=[];availability=None
+        if present:
+            current_ready=caps.get("currently_prepare_ready_routes");temporary=caps.get("temporarily_unavailable_routes");availability=caps.get("execution_availability")
+            if (caps.get("execution_implemented_routes")!=_EXPECTED_ROUTES or not _int(current_ready) or not 0<=current_ready<=_EXPECTED_ROUTES or not isinstance(temporary,list) or len(set(temporary))!=len(temporary) or caps.get("temporarily_unavailable_route_count")!=len(temporary) or current_ready!=_EXPECTED_ROUTES-len(temporary) or not isinstance(availability,dict) or availability.get("provider")!="circle_iris" or availability.get("status") not in {"available","degraded","unknown"} or availability.get("guarantees_future_availability") is not False):
+                _fail("assetfare_current_availability_invalid")
         return {
             "status": caps["status"],
             "chains": sorted(_CHAINS),
@@ -603,6 +612,10 @@ class AssetFareClient:
             "directed_conversion_routes": _EXPECTED_ROUTES,
             "unsigned_route_plans_ready": _EXPECTED_ROUTES,
             "execution_ready_routes": _EXECUTION_READY_ROUTES,
+            "execution_implemented_routes": _EXECUTION_READY_ROUTES,
+            "currently_prepare_ready_routes": current_ready,
+            "temporarily_unavailable_routes": temporary,
+            "execution_availability": availability,
             "phase_b_blocked_routes": _PHASE_B_BLOCKED_ROUTES,
             "source_only_asset_endpoints": sorted(f"{c}:{t}" for (c, t) in _SOURCE_ONLY_ENDPOINTS),
             "source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
@@ -717,6 +730,27 @@ class AssetFareClient:
         if eta is not None and (not _int(eta) or eta < 0):
             _fail("assetfare_response_invalid")
 
+        # Root-level total token-path cost. New Core supplies exact provider components; rollback Core is supported by
+        # deriving the receive-value delta and explicitly labeling provider detail unavailable.
+        cost=data.get("cost_summary")
+        expected_cost=max(0.0,amount-float(exp_usd));maximum_cost=max(0.0,amount-float(mn_usd))
+        if cost is None:
+            cost={"scope":"token_path_only_network_gas_excluded","input_value_usd":amount,"expected_receive_value_usd":float(exp_usd),"minimum_receive_value_usd":float(mn_usd),"expected_total_cost_usd":expected_cost,"maximum_total_cost_usd":maximum_cost,"expected_total_cost_percent":expected_cost/amount*100,"maximum_total_cost_percent":maximum_cost/amount*100,"assetfare_service_fee":{"bps":1,"estimated_usd":min(amount/10_000,5.0),"included_in_receive_amount":True,"note":"AssetFare service fee only; not the total route cost"},"provider_fee_components":[],"unpriced_costs":["provider_fee_breakdown_unavailable_legacy_core","source_chain_network_fee"],"rankable_all_in":False,"small_amount_warning":maximum_cost/amount>=.01,"warning":"Legacy-core fallback: total derived from receive value; provider detail unavailable."}
+        if not isinstance(cost,dict) or cost.get("scope")!="token_path_only_network_gas_excluded" or cost.get("rankable_all_in") is not False or cost.get("input_value_usd")!=amount or cost.get("expected_receive_value_usd")!=float(exp_usd) or cost.get("minimum_receive_value_usd")!=float(mn_usd):
+            _fail("assetfare_cost_summary_invalid")
+        for key in ("expected_total_cost_usd","maximum_total_cost_usd","expected_total_cost_percent","maximum_total_cost_percent"):
+            if not _finite(cost.get(key)) or float(cost[key])<0:_fail("assetfare_cost_summary_invalid")
+        if abs(float(cost["expected_total_cost_usd"])-expected_cost)>0.000001 or abs(float(cost["maximum_total_cost_usd"])-maximum_cost)>0.000001 or float(cost["maximum_total_cost_usd"])<float(cost["expected_total_cost_usd"]):
+            _fail("assetfare_cost_summary_invalid")
+        service=cost.get("assetfare_service_fee")
+        if not isinstance(service,dict) or service.get("bps")!=1 or service.get("included_in_receive_amount") is not True or not _finite(service.get("estimated_usd")) or abs(float(service["estimated_usd"])-min(amount/10_000,5.0))>0.000001:
+            _fail("assetfare_cost_summary_invalid")
+        if not isinstance(cost.get("provider_fee_components"),list) or not isinstance(cost.get("unpriced_costs"),list) or not isinstance(cost.get("small_amount_warning"),bool):
+            _fail("assetfare_cost_summary_invalid")
+        eta_summary=data.get("eta")
+        if eta_summary is not None and (not isinstance(eta_summary,dict) or eta_summary.get("estimated_time_seconds")!=eta or not isinstance(eta_summary.get("complete_route_estimate"),bool)):
+            _fail("assetfare_eta_invalid")
+
         # risk: non-atomic bool, fresh-quote flag true, sign flags false
         if not isinstance(risk.get("non_atomic"), bool):
             _fail("assetfare_response_invalid")
@@ -774,6 +808,8 @@ class AssetFareClient:
             "fee_collection": _FEE_COLLECTION_CONST,
             "assetfare_fee_note": fee_note,
             "estimated_time_seconds": eta if _int(eta) else None,
+            "cost_summary": cost,
+            "eta": eta_summary or {"estimated_time_seconds":eta if _int(eta) else None,"estimated_time_range_seconds":None,"complete_route_estimate":False,"sources":[],"note":"Legacy-core fallback; full ETA provenance unavailable"},
             "non_atomic": risk["non_atomic"],
             "quote_id": data["quote_id"],
             "as_of": as_of,
