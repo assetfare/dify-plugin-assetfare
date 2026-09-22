@@ -7,7 +7,7 @@ label:
   zh_Hans: AssetFare
 created_at: "2026-09-17T00:00:00Z"
 description:
-  en_US: Non-custodial quotes and caller-approved unsigned execution across 76 routes and six source chains; Polygon/Optimism are directional native-USDC source-only origins. AssetFare never signs, submits, or takes a private key or credential; the caller verifies, signs, and submits with its own wallet.
+  en_US: Non-custodial bridge and cross-chain swap quotes across 76 routes and six source chains; quotes show total token-path cost and live availability. AssetFare service fee 1bp; Circle/provider/network fees additional. Unsigned caller-approved actions only; never signs or submits.
   zh_Hans: 覆盖六个源链与 76 条路由的非托管报价及调用方批准的未签名执行；Polygon/Optimism 为原生 USDC 仅作源的方向性路由。AssetFare 绝不签名、提交或接收私钥或凭据；由调用方用自己的钱包验证、签名并提交。
 icon: icon.svg
 repo: https://github.com/odaiin/dify-plugin-assetfare

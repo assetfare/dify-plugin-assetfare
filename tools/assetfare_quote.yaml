@@ -8,7 +8,7 @@ description:
   human:
     en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (USD 1-1000). Read-only; no wallet, signing, or submission.
     zh_Hans: 获取一次包含费用的非托管跨链报价（1-1000 美元）。只读；无钱包、签名或提交。
-  llm: Request one fresh AssetFare quote for moving value between two supported (chain, token) endpoints in the USD 1-1000 band, then compare it with other executable routes. Only after the caller explicitly approves the selected route, follow the returned REST /v2/prepare handoff with public wallet addresses for one unsigned action plan. This tool itself never authenticates, prepares, signs, submits, swaps, or bridges.
+  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a USD 1-1000 route. AssetFare service fee is 1bp but is not total cost. Only after explicit approval follow the returned unsigned-action handoff. Never signs or submits.
 parameters:
   - name: from_chain
     type: select
@@ -20,7 +20,7 @@ parameters:
     human_description:
       en_US: The source chain to move value from.
       zh_Hans: 转出价值的源链。
-    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism; Polygon and Optimism are audited 1bp source-only origins and support native USDC to Base or Arbitrum USDC only
+    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism; Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum; check live availability
     options:
       - value: solana
         label: {en_US: solana, zh_Hans: solana}

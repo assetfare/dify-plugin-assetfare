@@ -8,7 +8,7 @@ description:
   human:
     en_US: On explicit caller approval, POST /v2/prepare for one fresh, re-quoted, bounded UNSIGNED first action for any supported route. Never signs or submits; no private key.
     zh_Hans: 在调用方明确批准后，调用 /v2/prepare 获取任一支持路由的全新、重新报价、有界的未签名首步操作。绝不签名或提交；无私钥。
-  llm: Explicit caller-approved one-shot. Only after the caller EXPLICITLY approves a specific execution-ready route, POST the fixed-origin /v2/prepare to obtain the fresh re-quoted bounded FIRST unsigned action bundle. Requires caller_approved literally true and the route's exact PUBLIC wallet map (JSON object mapping each route chain, e.g. the source and destination chain, to its public wallet address). Never auto-call this from a quote. Never pass a private key, seed, or signed transaction. The caller must verify, sign, and submit with its own wallet; AssetFare never signs or submits.
+  llm: Explicit caller-approved one-shot. Only after the caller EXPLICITLY approves a route whose fresh quote reports current prepare availability, POST the fixed-origin /v2/prepare to obtain the re-quoted bounded FIRST unsigned action bundle. Requires caller_approved literally true and the route's exact PUBLIC wallet map. Never auto-call from a quote; never pass a private key, seed, or signed transaction. AssetFare never signs or submits.
 parameters:
   - name: caller_approved
     type: boolean

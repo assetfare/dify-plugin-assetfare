@@ -6,9 +6,9 @@ identity:
     zh_Hans: 创建 AssetFare 会话（完整生命周期）
 description:
   human:
-    en_US: On explicit caller approval, POST /v2/session to open one idempotent, receipt-driven session for an execution-ready route and return its first unsigned action. Never signs or submits.
+    en_US: On explicit caller approval, open one receipt-driven session for a route whose fresh quote reports current availability. Returns an unsigned action; never signs or submits.
     zh_Hans: 在调用方明确批准后，调用 /v2/session 为执行就绪路由创建一个幂等、凭据驱动的会话并返回首步未签名操作。绝不签名或提交。
-  llm: Explicit caller-approved full-lifecycle create. Only after the caller EXPLICITLY approves a specific execution-ready route, POST the fixed-origin /v2/session to open one idempotent receipt-driven session and return its first unsigned action. Requires caller_approved literally true, the route's exact PUBLIC wallet map, a caller-generated session_token (from assetfare_new_session_capability; sent in the X-AssetFare-Session-Token header), and an idempotency_key. Retrying with the SAME token and idempotency_key recovers the SAME session (lost-response recovery). Never auto-call from a quote; never auto-chain; never pass a private key, seed, or signed transaction. AssetFare never signs or submits.
+  llm: Explicit caller-approved full-lifecycle create. Only after the caller approves a route whose fresh quote reports current availability, POST /v2/session to open an idempotent receipt-driven session and return its first unsigned action. Requires literal caller_approved true, exact public wallet map, caller-generated session_token, and idempotency_key. Never auto-chain; never pass secrets; AssetFare never signs or submits.
 parameters:
   - name: caller_approved
     type: boolean

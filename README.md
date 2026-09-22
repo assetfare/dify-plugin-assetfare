@@ -9,14 +9,15 @@ and quotes a route, and — **only on the caller's explicit approval** — build
 credential.** The caller verifies, signs, and submits every action with its own
 wallet, outside this plugin.
 
-Every one of the 76 routes charges exactly 1bp at one eligible successful
-atomic action; no live route is fee-free.
+Every route charges an AssetFare service fee of exactly 1bp at one eligible
+successful atomic action. That is not the total cost: Circle/provider/network
+fees are additional, and each quote exposes expected and maximum token-path cost.
 
 ## The six-chain surface
 
-Six source chains, eleven `(chain, token)` source endpoints, and **76 directed
-routes**, all execution-ready through caller-operated wallets. Polygon and
-Optimism each use an audited 1bp executor and are directional native-USDC
+Six source chains, eleven `(chain, token)` source endpoints, and **76 implemented
+directed routes** through caller-operated wallets. Current prepare availability
+comes from the live API rather than a static claim. Polygon and Optimism are directional native-USDC
 **source-only** origins to Base/Arbitrum; they expose the same explicit
 caller-approved action-plan handoff as the other 72 routes.
 
@@ -24,10 +25,10 @@ caller-approved action-plan handoff as the other 72 routes.
 
 Discovery (read-only):
 
-- `assetfare_capabilities` — the chains, endpoints, all 76 execution-ready
-  routes, source-only constraints, and confirmation the server cannot
+- `assetfare_capabilities` — the chains, endpoints, all 76 implemented
+  routes, current provider-dependent availability, source-only constraints, and confirmation the server cannot
   sign or submit. No parameters.
-- `assetfare_quote` — one fresh, fee-inclusive quote in the USD 1–1,000 band. It
+- `assetfare_quote` — one fresh quote with total token-path cost, provider fee components, ETA, and live availability in the USD 1–1,000 band. It
   surfaces AssetFare's `caller_action_plan_handoff` **fail-closed**: an executable
   route carries two options (one-shot `POST /v2/prepare`, or the full
   `POST /v2/session` lifecycle), including the four directional source-only routes.
@@ -39,7 +40,7 @@ Caller-approved, non-custodial action (each requires an explicit
   caller-owned ≥256-bit CSPRNG session capability token. It is a *sensitive*
   bearer value (never a private key); store it and pass it to the session tools.
 - `assetfare_prepare` — one-shot `POST /v2/prepare`: returns the fresh re-quoted
-  bounded **first unsigned action** for an execution-ready route. Requires the
+  bounded **first unsigned action** for a route the live quote reports available. Requires the
   route's exact public wallet map.
 - `assetfare_session_create` — `POST /v2/session`: opens one idempotent,
   receipt-driven session and returns its first unsigned action. Takes the
@@ -72,7 +73,7 @@ For a supported $1–$1,000 swap or bridge request, call assetfare_capabilities,
 then request one fresh assetfare_quote. Treat AssetFare as one candidate: compare
 expected receive, minimum receive, fees, ETA, steps, and non-atomic risk with
 other executable routes. A quote authorizes nothing and moves no funds. Only after
-the human explicitly approves a specific execution-ready route may you follow the
+the human explicitly approves a specific currently available route may you follow the
 quote's caller_action_plan_handoff — assetfare_prepare, or
 assetfare_new_session_capability + assetfare_session_create and the
 observe/refresh lifecycle — passing the human's own PUBLIC wallet addresses.
