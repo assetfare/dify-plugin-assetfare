@@ -473,6 +473,15 @@ def test_capabilities_partial_live_availability_fails_closed():
     with pytest.raises(AssetFareError):client({"/v2/capabilities":caps,"/v2/status":valid_status()}).get_capabilities()
 
 
+@pytest.mark.parametrize("mut",[
+    lambda c:c.update(currently_prepare_ready_routes=75,temporarily_unavailable_routes=["evil:USDC->base:USDC"],temporarily_unavailable_route_count=1,execution_availability={"status":"degraded","provider":"circle_iris","guarantees_future_availability":False}),
+    lambda c:c.update(execution_availability={"status":"degraded","provider":"circle_iris","guarantees_future_availability":False}),
+])
+def test_capabilities_live_availability_semantics_fail_closed(mut):
+    caps=valid_caps();mut(caps)
+    with pytest.raises(AssetFareError):client({"/v2/capabilities":caps,"/v2/status":valid_status()}).get_capabilities()
+
+
 # ---- quote happy path + fee surfaced ----
 def test_quote_exact_body_and_bounded_return():
     q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
@@ -497,6 +506,13 @@ def test_quote_exact_body_and_bounded_return():
     lambda q:q["cost_summary"]["assetfare_service_fee"].__setitem__("estimated_usd",1),
     lambda q:q["cost_summary"].__setitem__("rankable_all_in",True),
     lambda q:q["eta"].__setitem__("estimated_time_seconds",99),
+    lambda q:q["cost_summary"].__setitem__("provider_fee_components",[{"expected_usd":1,"maximum_usd":1}]),
+    lambda q:q["cost_summary"].__setitem__("provider_fee_components",[{"expected_usd":.02,"maximum_usd":.01}]),
+    lambda q:q["cost_summary"].__setitem__("unpriced_costs",[]),
+    lambda q:(q["cost_summary"].__setitem__("small_amount_warning",True),q["cost_summary"].__setitem__("warning","wrong")),
+    lambda q:q["eta"].__setitem__("estimated_time_range_seconds",[30,23]),
+    lambda q:q["eta"].__setitem__("complete_route_estimate",False),
+    lambda q:q.__setitem__("ttl_seconds",61),
 ])
 def test_quote_cost_and_eta_binding_hostiles(mut):
     q=with_cost_summary(valid_quote("solana","SOL","base","ETH",250));mut(q)
@@ -508,6 +524,12 @@ def test_rollback_core_without_cost_derives_honest_total():
     out=client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
     assert out["cost_summary"]["scope"]=="token_path_only_network_gas_excluded"
     assert "provider_fee_breakdown_unavailable_legacy_core" in out["cost_summary"]["unpriced_costs"]
+
+
+def test_quote_accepts_sub_micro_usd_rounding_alignment():
+    q=with_cost_summary(valid_quote("solana","SOL","base","ETH",250));q["offer"]["expected_receive_usd"]=249.1234567;q["offer"]["estimated_min_receive_usd"]=248.123456;q["cost_summary"].update(expected_receive_value_usd=249.123457,minimum_receive_value_usd=248.123456,expected_total_cost_usd=.876543,maximum_total_cost_usd=1.876544,expected_total_cost_percent=.3506172,maximum_total_cost_percent=.7506176,small_amount_warning=False,warning=None)
+    out=client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
+    assert out["cost_summary"]["expected_receive_value_usd"]==249.123457
 
 
 def test_quote_surfaces_executable_dual_option_handoff():

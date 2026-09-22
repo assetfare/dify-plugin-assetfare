@@ -1,4 +1,4 @@
-# Dify Marketplace policy determination — AssetFare 0.0.5
+# Dify Marketplace policy determination — AssetFare 0.0.6
 
 Re-verified 2026-09-19 against Dify's **current** plugin submission requirements
 and review guidelines, for the question: does adding an **unsigned**,
@@ -50,7 +50,7 @@ but returning an unsigned bundle is quote-style; either way it is publishable.)
 ## Requirements satisfied for listing
 
 - **manifest.yaml** — accurate author/name/version/type/runner/icon/privacy;
-  version incremented to 0.0.5; `privacy: PRIVACY.md` declared. ✔
+  version incremented to 0.0.6; `privacy: PRIVACY.md` declared. ✔
 - **README (English)** — setup, usage, required APIs/connection, source repo link,
   explicit security boundary. ✔
 - **PRIVACY.md** — declares exactly what each tool sends (including public wallet
