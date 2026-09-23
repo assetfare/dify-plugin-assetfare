@@ -8,6 +8,8 @@ This Marketplace package exposes **no wallet, authentication, prepare, session,
 transaction-construction, signing, submission, funding, swap, or bridge-
 execution tool**. It cannot move funds and accepts no private key, seed phrase,
 signed transaction, API key, password, wallet address, or credential.
+Marketplace users therefore receive evaluation data only; choosing or executing
+a route always happens outside this plugin under the caller's control.
 
 ## Public scope
 
