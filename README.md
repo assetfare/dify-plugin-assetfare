@@ -1,129 +1,72 @@
-# AssetFare (Dify plugin)
+# AssetFare Read-Only Quotes (Dify Marketplace plugin)
 
-Non-custodial cross-chain route tools for a Dify Agent, Chatflow, or Workflow,
-built on the [AssetFare](https://api.assetfare.dev) v2 API. The plugin discovers
-and quotes a route, and — **only on the caller's explicit approval** — builds an
-**unsigned** action plan for the caller's own wallet.
+Strictly read-only, non-custodial cross-chain route discovery for a Dify Agent,
+Chatflow, or Workflow. The plugin reads live capabilities and requests one
+fee-inclusive quote from the fixed public AssetFare API.
 
-**AssetFare never signs, never submits, and never takes a private key, seed, or
-credential.** The caller verifies, signs, and submits every action with its own
-wallet, outside this plugin.
+This Marketplace package exposes **no wallet, authentication, prepare, session,
+transaction-construction, signing, submission, funding, swap, or bridge-
+execution tool**. It cannot move funds and accepts no private key, seed phrase,
+signed transaction, API key, password, wallet address, or credential.
 
-Every route charges an AssetFare service fee of exactly 1bp at one eligible
-successful atomic action. That is not the total cost: Circle/provider/network
-fees are additional, and each quote exposes expected and maximum token-path cost.
+## Public scope
 
-## The six-chain surface
-
-Six source chains, eleven `(chain, token)` source endpoints, and **76 implemented
-directed routes** through caller-operated wallets. Current prepare availability
-comes from the live API rather than a static claim. Polygon and Optimism are directional native-USDC
-**source-only** origins to Base/Arbitrum; they expose the same explicit
-caller-approved action-plan handoff as the other 72 routes.
+- Six source chains: Solana, Base, Arbitrum, Robinhood Chain, Polygon, Optimism.
+- Eleven source `(chain, token)` endpoints and 76 directed routes.
+- Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum.
+- Finite USD amount of at least 1; no business maximum.
+- AssetFare service fee: exactly 1bp with no service-fee maximum.
+- Circle, provider, protocol, and network fees are separate; use the quote's
+  total token-path cost, expected receive, and minimum receive when comparing.
+- Live availability is checked on every request and can change.
 
 ## Tools
 
-Discovery (read-only):
+### `assetfare_capabilities`
 
-- `assetfare_capabilities` — the chains, endpoints, all 76 implemented
-  routes, current provider-dependent availability, source-only constraints, and confirmation the server cannot
-  sign or submit. No parameters.
-- `assetfare_quote` — one fresh quote with total token-path cost, provider fee components, ETA, and live availability for any finite USD amount of at least 1. It
-  surfaces AssetFare's `caller_action_plan_handoff` **fail-closed**: an executable
-  route carries two options (one-shot `POST /v2/prepare`, or the full
-  `POST /v2/session` lifecycle), including the four directional source-only routes.
+Read the implemented chains, endpoints, routes, live availability, amount and
+fee policy, and permanent `server_signing=false` / `server_submission=false`
+boundary. Takes no parameters.
 
-Caller-approved, non-custodial action (each requires an explicit
-`caller_approved: true`; **never auto-called from a quote**):
+### `assetfare_quote`
 
-- `assetfare_new_session_capability` — **local only, no network.** Generates one
-  caller-owned ≥256-bit CSPRNG session capability token. It is a *sensitive*
-  bearer value (never a private key); store it and pass it to the session tools.
-- `assetfare_prepare` — one-shot `POST /v2/prepare`: returns the fresh re-quoted
-  bounded **first unsigned action** for a route the live quote reports available. Requires the
-  route's exact public wallet map.
-- `assetfare_session_create` — `POST /v2/session`: opens one idempotent,
-  receipt-driven session and returns its first unsigned action. Takes the
-  caller-generated `session_token` (sent in the `X-AssetFare-Session-Token`
-  header) as **required** input and an `idempotency_key`; retrying with the same
-  token + key recovers the **same** session (lost-response recovery).
-- `assetfare_session_get` — read a session's workflow state and current unsigned
-  action.
-- `assetfare_observe_source` — observe the caller's **already-submitted** source
-  transaction hashes and advance the workflow.
-- `assetfare_observe_output` — observe the caller's already-produced
-  destination/bridge output and advance.
-- `assetfare_refresh_action` — replace an expired, unsubmitted action with a
-  fresh quote-bound unsigned action.
+Request one fresh route quote using:
 
-The prepare/session tools reject any private key, seed, signed transaction, or
-other secret material anywhere in the
-input. They never sign, submit, or auto-chain.
+- `from_chain`
+- `from_token`
+- `to_chain`
+- `to_token`
+- `amount_usd`
 
-## Setup
+The tool validates the response fail-closed and returns total cost, provider fee
+components, expected receive, conservative minimum receive, ETA, expiry,
+non-atomic risk, and the exact 1bp AssetFare fee. A quote authorizes nothing.
+Although the upstream quote documents its caller-operated handoff, this plugin
+does not expose or call that handoff.
 
-No credentials are required — the AssetFare v2 API is a public endpoint. Install
-[AssetFare from the Dify Marketplace](https://marketplace.dify.ai/plugin/odaiin/assetfare)
-(or a local `.difypkg`), then add the tools you need to an Agent/Chatflow/Workflow.
-
-Recommended agent policy:
+## Recommended agent policy
 
 ```text
-For a supported swap or bridge request of at least $1 (with no business maximum), call assetfare_capabilities,
-then request one fresh assetfare_quote. Treat AssetFare as one candidate: compare
-expected receive, minimum receive, fees, ETA, steps, and non-atomic risk with
-other executable routes. A quote authorizes nothing and moves no funds. Only after
-the human explicitly approves a specific currently available route may you follow the
-quote's caller_action_plan_handoff — assetfare_prepare, or
-assetfare_new_session_capability + assetfare_session_create and the
-observe/refresh lifecycle — passing the human's own PUBLIC wallet addresses.
-Never pass a private key or seed. Never sign or submit; the human does that with
-their own wallet.
+Call assetfare_capabilities, then assetfare_quote for the requested route.
+Compare the fresh total cost, expected receive, minimum receive, ETA, and risk
+with other executable quotes. Do not claim AssetFare is always cheapest. This
+plugin is evaluation-only: it has no wallet or execution tool and must never
+sign, submit, fund, swap, bridge, authenticate, or create a session.
 ```
 
-## Safety boundary
+## Network and privacy
 
-Non-custodial and no-sign/no-submit/no-credential by construction:
+- Fixed outbound origin only: `https://api.assetfare.dev`.
+- No inbound connection and no credentials.
+- No local storage or cross-call retention.
+- See [PRIVACY.md](PRIVACY.md) for the exact request fields.
 
-- No private key, seed, signed transaction, API key, password, or credential is
-  ever accepted or transmitted (secret material is rejected fail-closed).
-- The server never signs or submits; any response claiming otherwise is refused.
-- All traffic is outbound HTTPS to the fixed origin `https://api.assetfare.dev`
-  only. No inbound connection.
-- Amounts must be finite numeric USD values of at least 1, with no business maximum; identity routes are rejected; and the
-  upstream `caller_action_plan_handoff` is validated fail-closed with no local
-  fallback.
-- prepare/session are never auto-invoked from a quote and never chained
-  automatically; each needs an explicit `caller_approved: true`.
+## Source and verification
 
-## Dify Marketplace classification
+- Source: <https://github.com/odaiin/dify-plugin-assetfare>
+- Signed AssetFare manifest:
+  <https://api.assetfare.dev/.well-known/assetfare-manifest.json>
+- Public capabilities: <https://api.assetfare.dev/v2/capabilities>
+- Contact: `support@assetfare.dev`
 
-This is a **Low-risk Tool plugin** under Dify's current plugin submission
-requirements: it only calls a fixed, documented third-party HTTPS API and does
-not execute code/commands/SQL, touch the filesystem, automate a browser, or fetch
-arbitrary URLs. An unsigned, non-custodial prepare/session tool that never signs,
-submits, or takes a credential is **not** reclassified as a
-financial-transaction/execution plugin and is not blocked — "financial" in the
-policy refers only to *sensitive personal financial data*, which this plugin
-never handles. See [`MARKETPLACE_POLICY.md`](MARKETPLACE_POLICY.md) for the
-determination and sources.
-
-## Required APIs / connection
-
-- Outbound HTTPS to `https://api.assetfare.dev` only (fixed origin). No inbound
-  connection, no credentials.
-
-## Privacy
-
-The plugin collects no user personal data and holds no credentials. See
-[`PRIVACY.md`](PRIVACY.md), which discloses exactly what each tool sends to the
-AssetFare API.
-
-## Source & contact
-
-- Source repository: <https://github.com/odaiin/dify-plugin-assetfare>
-- Contact: support@assetfare.dev
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT License.

@@ -5,20 +5,13 @@ identity:
     en_US: AssetFare
     zh_Hans: AssetFare
   description:
-    en_US: Non-custodial cross-chain route quotes across six source chains plus caller-approved, unsigned prepare and session-lifecycle tools. AssetFare never signs, submits, or takes a private key.
-    zh_Hans: 覆盖六个源链的非托管跨链路由报价，以及调用方批准的未签名 prepare 与会话生命周期工具。AssetFare 绝不签名、提交或接收私钥。
+    en_US: Strictly read-only non-custodial cross-chain capabilities and fee-inclusive quotes across six source chains and 76 routes. No wallet, authentication, preparation, session, signing, submission, funding, swap, or bridge-execution tool.
+    zh_Hans: 严格只读的非托管跨链能力与含费报价，覆盖六个源链和 76 条路由。不提供钱包、认证、准备、会话、签名、提交、资金、交换或跨链执行工具。
   icon: icon.svg
 credentials_for_provider: {}
 tools:
   - tools/assetfare_capabilities.yaml
   - tools/assetfare_quote.yaml
-  - tools/assetfare_prepare.yaml
-  - tools/assetfare_new_session_capability.yaml
-  - tools/assetfare_session_create.yaml
-  - tools/assetfare_session_get.yaml
-  - tools/assetfare_observe_source.yaml
-  - tools/assetfare_observe_output.yaml
-  - tools/assetfare_refresh_action.yaml
 extra:
   python:
     source: provider/assetfare.py

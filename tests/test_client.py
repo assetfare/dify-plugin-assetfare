@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.client import AssetFareClient, AssetFareError, new_session_capability
+from utils.client import AssetFareClient, AssetFareError
 
 # Fixed "now" so the fixed-timestamp quote fixture (as_of 2026-09-17T00:00:00Z,
 # ttl 30) is fresh (10s in). Tests inject this so they do not depend on wall time.
@@ -532,115 +532,30 @@ def test_rollback_core_without_cost_derives_honest_total():
     assert "provider_fee_breakdown_unavailable_legacy_core" in out["cost_summary"]["unpriced_costs"]
 
 
+def test_rollback_core_large_amount_fee_is_exact_one_bp_without_maximum():
+    amount = 100_000
+    q = valid_quote("solana", "SOL", "base", "ETH", amount)
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", amount)
+    assert out["cost_summary"]["assetfare_service_fee"]["estimated_usd"] == 10
+
+
 def test_quote_accepts_sub_micro_usd_rounding_alignment():
     q=with_cost_summary(valid_quote("solana","SOL","base","ETH",250));q["offer"]["expected_receive_usd"]=249.1234567;q["offer"]["estimated_min_receive_usd"]=248.123456;q["cost_summary"].update(expected_receive_value_usd=249.123457,minimum_receive_value_usd=248.123456,expected_total_cost_usd=.876543,maximum_total_cost_usd=1.876544,expected_total_cost_percent=.3506172,maximum_total_cost_percent=.7506176,small_amount_warning=False,warning=None)
     out=client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
     assert out["cost_summary"]["expected_receive_value_usd"]==249.123457
 
 
-def test_quote_surfaces_executable_dual_option_handoff():
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
-    handoff = out["caller_action_plan_handoff"]
-    assert handoff["available"] is True
-    assert handoff["url"] == PREPARE_URL
-    assert handoff["request_fields"] == REQUEST_FIELDS
-    assert handoff["request_fields"][0] == "caller_approved"
-    assert len(handoff["options"]) == 2
-    assert handoff["options"][0]["kind"] == "one_shot_first_unsigned_bundle"
-    assert handoff["options"][1]["kind"] == "caller_approved_full_workflow_session"
-    assert handoff["requires_fresh_requote"] is True
-    assert handoff["automatic_prepare_call_forbidden"] is True
-    # v1 stays old-exact: NO machine fields on the v1 handoff.
-    assert not ({"selection", "mutually_exclusive", "do_not_call_both", "enforcement", "schema_version"} & set(handoff))
 
 
-def test_quote_surfaces_v2_sibling():
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
-    v2 = out["caller_action_plan_handoff_v2"]
-    assert out["handoff_schema_version"] == 2 and v2["schema_version"] == 2
-    assert v2["selection"] == "choose_exactly_one" and v2["mutually_exclusive"] is True
-    assert v2["do_not_call_both"] is True and v2["enforcement"] == "advisory_caller_side"
-    assert v2["options"][0]["preview_or_manual_first_action_only"] is True and v2["options"][0]["not_a_session"] is True
-    assert v2["options"][1]["recommended_for_multistep"] is True
 
 
-def test_rollback_core_no_v2_still_quotes():
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    q.pop("caller_action_plan_handoff_v2")
-    q.pop("handoff_schema_version")
-    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
-    assert out["caller_action_plan_handoff_v2"] is None and out["handoff_schema_version"] is None
-    assert out["caller_action_plan_handoff"]["available"] is True
 
 
-@pytest.mark.parametrize(
-    "mut",
-    [
-        lambda q: q.pop("caller_action_plan_handoff_v2"),  # orphan version
-        lambda q: q.pop("handoff_schema_version"),  # orphan sibling
-        lambda q: q.update(caller_action_plan_handoff_v2=None),  # null sibling with version
-        lambda q: q.update(handoff_schema_version=3),  # wrong top version
-        lambda q: q["caller_action_plan_handoff_v2"].update(schema_version=1),  # wrong sibling version
-        lambda q: q["caller_action_plan_handoff_v2"].pop("do_not_call_both"),  # missing machine field
-        lambda q: q["caller_action_plan_handoff_v2"].update(enforcement="server_enforced"),  # overclaim
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].pop("note"),  # option missing note
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].pop("not_a_session"),  # option missing required
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][0].update(recommended_for_multistep=True),  # cross-field
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"].pop("create"),  # missing lifecycle
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"]["create"].update(url="https://api.assetfare.dev/v2/evil"),  # arbitrary lifecycle
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"]["create"].pop("method"),  # lifecycle missing method
-        lambda q: q["caller_action_plan_handoff_v2"]["options"][1]["lifecycle_urls"].update(extra={"method": "POST", "url": SESSION_URL}),  # extra lifecycle
-        lambda q: (q.update(caller_action_plan_handoff_v2=None), q.pop("handoff_schema_version")),  # null sibling without version key
-        lambda q: q.update(caller_action_plan_handoff_v2=[]),  # array sibling (version present)
-        lambda q: q["caller_action_plan_handoff_v2"].update(blocker=None),  # v2 must be exact: no blocker key
-    ],
-)
-def test_quote_v2_sibling_malformed_rejected(mut):
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    mut(q)
-    with pytest.raises(AssetFareError):
-        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
 # ---- FAIL-CLOSED handoff (no local fallback) ----
-@pytest.mark.parametrize(
-    "mut",
-    [
-        lambda q: q.pop("caller_action_plan_handoff"),  # missing
-        lambda q: q.update(caller_action_plan_handoff=None),  # null
-        lambda q: q.update(caller_action_plan_handoff=[]),  # array
-        lambda q: q.update(caller_action_plan_handoff="x"),  # string
-    ],
-)
-def test_quote_handoff_missing_or_wrong_type_rejected(mut):
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    mut(q)
-    with pytest.raises(AssetFareError):
-        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
-@pytest.mark.parametrize(
-    "mut",
-    [
-        lambda h: h.update(private_key="0xdead"),  # private-key material -> extra field
-        lambda h: h.update(evil="x"),  # extra field
-        lambda h: h.update(request_fields=REQUEST_FIELDS[1:]),  # short
-        lambda h: h.update(request_fields=list(reversed(REQUEST_FIELDS))),  # reordered
-        lambda h: h.update(request_fields=["from_chain", "from_token", "to_chain", "to_token", "amount_usd", "wallets", "event_signer_public"]),  # old 7-field
-        lambda h: h.update(assetfare_server_signing=True),  # signing claim
-        lambda h: h.update(requires_fresh_requote=False),
-        lambda h: h.update(automatic_prepare_call_forbidden=False),
-        lambda h: h.update(options=[prepare_option()]),  # only one option
-        lambda h: h.pop("url"),  # executable must carry url
-    ],
-)
-def test_quote_handoff_malformed_rejected(mut):
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    mut(q["caller_action_plan_handoff"])
-    with pytest.raises(AssetFareError):
-        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
 # ---- source-only directional quotes use the same executable handoff ----
@@ -651,10 +566,21 @@ def test_source_only_quote_execution_ready():
     assert out["execution_supported"] is True
     assert out["execution_blocker"] is None
     assert out["fee_collectible_now"] is True
-    handoff = out["caller_action_plan_handoff"]
-    assert handoff["available"] is True
-    assert handoff["url"] == PREPARE_URL
-    assert len(handoff["options"]) == 2
+    assert "caller_action_plan_handoff" not in out
+    assert "caller_action_plan_handoff_v2" not in out
+    assert "handoff_schema_version" not in out
+
+
+def test_quote_only_client_has_no_action_methods():
+    forbidden = {
+        "prepare",
+        "session_create",
+        "session_get",
+        "observe_source",
+        "observe_output",
+        "refresh_action",
+    }
+    assert forbidden.isdisjoint(dir(AssetFareClient))
 
 
 def test_optimism_source_only_one_fee_quote_ok():
@@ -665,18 +591,8 @@ def test_optimism_source_only_one_fee_quote_ok():
     assert out["fee_collectible_now"] is True
 
 
-def test_source_only_quote_without_prepare_url_rejected():
-    q = valid_quote("polygon", "USDC", "base", "USDC", 100, source_only=True, fee=1)
-    q["caller_action_plan_handoff"].pop("url")
-    with pytest.raises(AssetFareError):
-        client({"/v2/quote": q}).get_quote("polygon", "USDC", "base", "USDC", 100)
 
 
-def test_executable_quote_with_blocked_handoff_rejected():
-    q = valid_quote("solana", "SOL", "base", "ETH", 250)
-    q["caller_action_plan_handoff"]["available"] = False
-    with pytest.raises(AssetFareError):
-        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
 
 
 # ---- fee EXACTLY 1bp ----
@@ -781,211 +697,3 @@ def test_quote_signing_claim_rejected():
 
 
 # ---- new_session_capability (local-only token, no network) ----
-def test_new_session_capability_local_only():
-    cap = new_session_capability()
-    assert cap["token_bits"] == 256
-    assert 43 <= cap["token_length"] <= 128
-    assert cap["is_private_key"] is False
-    assert cap["network_calls"] == 0
-    assert cap["server_signing"] is False
-    import re
-
-    assert re.match(r"^[A-Za-z0-9_-]{43,128}$", cap["session_token"])
-    # Two calls produce distinct tokens.
-    assert cap["session_token"] != new_session_capability()["session_token"]
-
-
-# ---- prepare: caller_approved gate (build BEFORE any network) ----
-@pytest.mark.parametrize("approved", [False, None, "true", 1, 0, "True"])
-def test_prepare_caller_approved_gate(approved):
-    # client({}) raises AssertionError if a network call is attempted -> proves the
-    # gate fails closed before any request.
-    with pytest.raises(AssetFareError):
-        client({}).prepare(approved, "solana", "SOL", "base", "ETH", 100, wallets_for("solana", "base"))
-
-
-def test_prepare_source_only_execution_ready():
-    c, up = stateful()
-    bundle = c.prepare(True, "polygon", "USDC", "base", "USDC", 100, wallets_for("polygon", "base"))
-    assert bundle["signed"] is False and bundle["submitted"] is False
-    assert ("POST", "/v2/prepare") in up.calls
-
-
-@pytest.mark.parametrize(
-    "wallets",
-    [
-        {"solana": SOL, "base": EVM, "private_key": "0xdead"},  # secret material
-        {"solana": SOL, "base": "not-an-address"},  # non-public value
-        {"solana": SOL},  # missing destination chain wallet
-        {"base": EVM},  # missing source chain wallet
-        "0xdeadbeef",  # not a map
-        {},  # empty
-    ],
-)
-def test_prepare_wallet_hostiles_before_network(wallets):
-    with pytest.raises(AssetFareError):
-        client({}).prepare(True, "solana", "SOL", "base", "ETH", 100, wallets)
-
-
-def test_prepare_private_key_event_signer_rejected():
-    with pytest.raises(AssetFareError):
-        client({}).prepare(
-            True,
-            "solana",
-            "SOL",
-            "base",
-            "ETH",
-            100,
-            wallets_for("solana", "base"),
-            event_signer_public="not-a-public-key",
-        )
-
-
-def test_prepare_happy_path_returns_unsigned_bundle():
-    c, up = stateful()
-    bundle = c.prepare(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"))
-    assert bundle["unsigned_action"]["transaction"] == "0xUNSIGNED"
-    assert bundle["signed"] is False and bundle["submitted"] is False
-    assert bundle["server_signing"] is False and bundle["server_submission"] is False
-    assert ("POST", "/v2/prepare") in up.calls
-
-
-def test_prepare_bundle_unsafe_rejected():
-    class _Up(_Upstream):
-        def _bundle(self):
-            b = super()._bundle()
-            b["signed"] = True
-            return b
-
-    up = _Up()
-    c = af(session=_StatefulSession(up))
-    with pytest.raises(AssetFareError):
-        c.prepare(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"))
-
-
-# ---- session lifecycle happy path ----
-def test_session_lifecycle_happy_path():
-    c, _up = stateful()
-    cap = new_session_capability()["session_token"]
-    created = c.session_create(
-        True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "create-0001"
-    )
-    sid = created["session_id"]
-    assert created["status"] == "action_ready"
-    got = c.session_get(cap, sid)
-    assert got["session_id"] == sid
-    src = c.observe_source(cap, sid, "src-00001", ["0x" + "c" * 40])
-    assert src["session_id"] == sid
-    out = c.observe_output(cap, sid, "out-00001")
-    assert out["status"] == "complete"
-
-
-# ---- session token hostiles ----
-def test_session_get_missing_token_rejected_before_network():
-    c, up = stateful()
-    with pytest.raises(AssetFareError):
-        c.session_get(None, "00000000-0000-4000-8000-000000000001")
-    assert up.calls == []  # no network
-
-
-def test_session_get_wrong_token_rejected():
-    c, _up = stateful()
-    cap = new_session_capability()["session_token"]
-    created = c.session_create(
-        True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "create-0001"
-    )
-    other = new_session_capability()["session_token"]
-    with pytest.raises(AssetFareError):
-        c.session_get(other, created["session_id"])
-
-
-def test_session_replay_same_token_and_key_same_session():
-    c, _up = stateful()
-    cap = new_session_capability()["session_token"]
-    a = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "key-0001")
-    b = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "key-0001")
-    assert a["session_id"] == b["session_id"]
-    assert b["idempotent_replay"] is True
-
-
-def test_session_different_token_same_key_independent_session():
-    c, _up = stateful()
-    cap1 = new_session_capability()["session_token"]
-    cap2 = new_session_capability()["session_token"]
-    a = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap1, "key-0001")
-    b = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap2, "key-0001")
-    assert a["session_id"] != b["session_id"]
-
-
-def test_session_lost_create_response_retry_same_session():
-    # The caller owns the token; retrying a lost create with the same token + key
-    # recovers the same session (no duplicate).
-    c, _up = stateful()
-    cap = new_session_capability()["session_token"]
-    first = c.session_create(
-        True, "arbitrum", "USDC", "base", "USDC", 30, wallets_for("arbitrum", "base"), cap, "lost-0001"
-    )
-    retry = c.session_create(
-        True, "arbitrum", "USDC", "base", "USDC", 30, wallets_for("arbitrum", "base"), cap, "lost-0001"
-    )
-    assert retry["session_id"] == first["session_id"]
-    assert retry["idempotent_replay"] is True
-
-
-def test_session_create_caller_approved_gate():
-    c, up = stateful()
-    cap = new_session_capability()["session_token"]
-    with pytest.raises(AssetFareError):
-        c.session_create(False, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "keyapprv1")
-    assert up.calls == []  # gate before network
-
-
-def test_session_create_source_only_execution_ready():
-    c, _up = stateful()
-    cap = new_session_capability()["session_token"]
-    created = c.session_create(
-        True, "polygon", "USDC", "base", "USDC", 25, wallets_for("polygon", "base"), cap, "source-key"
-    )
-    assert created["status"] == "action_ready"
-
-
-def test_session_expired_refresh_recovers():
-    c, up = stateful()
-    cap = new_session_capability()["session_token"]
-    created = c.session_create(
-        True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "exp-00001"
-    )
-    sid = created["session_id"]
-    up.expire(sid)
-    got = c.session_get(cap, sid)
-    assert got["status"] == "action_expired"
-    with pytest.raises(AssetFareError):
-        c.observe_source(cap, sid, "src-exp01", ["0x" + "b" * 40])
-    refreshed = c.refresh_action(cap, sid, "refresh-01")
-    assert refreshed["status"] == "action_ready"
-    assert refreshed["action_available"] is True
-
-
-def test_invalid_session_token_format_rejected():
-    c, _up = stateful()
-    with pytest.raises(AssetFareError):
-        c.session_get("short", "00000000-0000-4000-8000-000000000001")
-    with pytest.raises(AssetFareError):
-        c.session_get(new_session_capability()["session_token"], "not-a-uuid")
-
-
-# ---- 76-route multi-step MOCK e2e matrix: all 76 complete ------------------
-def test_e2e_76_route_matrix_all_complete():
-    c, _up = stateful()
-    completed = 0
-    for i, (fc, ft, tc, tt) in enumerate(all_routes()):
-        tag = f"{i:03d}"
-        wallets = wallets_for(fc, tc)
-        cap = new_session_capability()["session_token"]
-        created = c.session_create(True, fc, ft, tc, tt, 10, wallets, cap, f"matrix-{tag}")
-        sid = created["session_id"]
-        c.observe_source(cap, sid, f"source-{tag}", ["0x" + "c" * 40])
-        out = c.observe_output(cap, sid, f"output-{tag}")
-        assert out["status"] == "complete"
-        completed += 1
-    assert completed == 76

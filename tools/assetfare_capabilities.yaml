@@ -8,7 +8,7 @@ description:
   human:
     en_US: List the AssetFare chains, assets, routes, and confirm the server cannot sign or submit. Read-only.
     zh_Hans: 列出 AssetFare 支持的链、资产、路由，并确认服务器不会签名或提交。只读。
-  llm: List six source chains, eleven source endpoints, 76 implemented routes, and current provider-dependent prepare availability. Polygon/Optimism are native-USDC source-only to Base/Arbitrum. AssetFare service fee is 1bp; provider/network fees are additional. Read-only; no wallet or key.
+  llm: List six source chains, eleven source endpoints, 76 implemented routes, and current provider-dependent quote availability. Polygon/Optimism are native-USDC source-only to Base/Arbitrum. AssetFare service fee is exact 1bp with no service-fee maximum; provider/network fees are additional. Strictly read-only; no wallet, credential, action, session, signing, or submission tool.
 parameters: []
 extra:
   python:

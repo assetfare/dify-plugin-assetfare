@@ -20,9 +20,7 @@ class AssetFareQuoteTool(Tool):
         except AssetFareError as exc:
             yield self.create_text_message(f"AssetFare quote unavailable ({exc}).")
             return
-        # The client surfaces the upstream caller_action_plan_handoff FAIL-CLOSED
-        # (no local fallback): a missing/malformed handoff is rejected, executable
-        # routes carry the dual-option handoff (prepare + full session lifecycle), and
-        # source-only routes carry available:false with no prepare url. This tool never
-        # calls prepare/session, receives a private key, signs, or submits.
+        # The client validates the upstream non-custodial handoff as a safety
+        # assertion, but this Marketplace plugin exposes no action/session tool and
+        # never calls it. It only returns the fresh, fee-inclusive quote.
         yield self.create_json_message(dict(result))

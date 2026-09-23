@@ -8,7 +8,7 @@ description:
   human:
     en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (finite USD amount, minimum 1; no business maximum). Read-only; no wallet, signing, or submission.
     zh_Hans: 获取一次包含费用的非托管跨链报价（有限数值，最低 1 美元；无业务上限）。只读；无钱包、签名或提交。
-  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a finite USD amount of at least 1, with no business maximum. AssetFare service fee is 1bp but is not total cost. Only after explicit approval follow the returned unsigned-action handoff. Never signs or submits.
+  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a finite USD amount of at least 1, with no business maximum. AssetFare service fee is exact 1bp with no service-fee maximum but is not total cost. Evaluation only; the plugin has no wallet, action, session, signing, or submission tool.
 parameters:
   - name: from_chain
     type: select
