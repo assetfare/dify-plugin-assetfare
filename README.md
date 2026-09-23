@@ -65,7 +65,7 @@ sign, submit, fund, swap, bridge, authenticate, or create a session.
 
 ## Source and verification
 
-- Source: <https://github.com/odaiin/dify-plugin-assetfare>
+- Source: <https://github.com/assetfare/dify-plugin-assetfare>
 - Signed AssetFare manifest:
   <https://api.assetfare.dev/.well-known/assetfare-manifest.json>
 - Public capabilities: <https://api.assetfare.dev/v2/capabilities>

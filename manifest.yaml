@@ -10,7 +10,7 @@ description:
   en_US: Strictly read-only non-custodial capabilities and fee-inclusive bridge/cross-chain swap quotes across six source chains and 76 routes. USD 1 minimum, no business maximum, exact 1bp AssetFare fee with no service-fee maximum; Circle/provider/network fees additional. No wallet or execution tools.
   zh_Hans: 严格只读的非托管能力与含费跨链报价，覆盖六个源链和 76 条路由。最低 1 美元、无业务金额上限，AssetFare 精确 1bp 且无服务费上限；Circle/提供商/网络费另计。不提供钱包或执行工具。
 icon: icon.svg
-repo: https://github.com/odaiin/dify-plugin-assetfare
+repo: https://github.com/assetfare/dify-plugin-assetfare
 contact: support@assetfare.dev
 privacy: PRIVACY.md
 network:

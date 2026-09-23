@@ -32,4 +32,4 @@ quote authorizes nothing and cannot move funds.
 The plugin stores nothing and retains nothing between calls.
 
 Questions: `support@assetfare.dev`
-Source: <https://github.com/odaiin/dify-plugin-assetfare>
+Source: <https://github.com/assetfare/dify-plugin-assetfare>
