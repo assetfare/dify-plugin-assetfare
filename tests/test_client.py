@@ -95,6 +95,7 @@ def valid_caps():
             "optimism:USDC->arbitrum:USDC",
         ],
         "blocked_source_only_routes": [],
+        "amount_usd": {"minimum": 1, "maximum": None, "policy": "no_business_maximum"},
     }
 
 
@@ -281,7 +282,7 @@ class _Upstream:
 
     def _uuid(self):
         self._n += 1
-        return "00000000-0000-4000-8000-{:012d}".format(self._n)
+        return f"00000000-0000-4000-8000-{self._n:012d}"
 
     def _bundle(self):
         return {
@@ -448,6 +449,11 @@ def test_capabilities_ok():
         "optimism:USDC->arbitrum:USDC",
     }
     assert caps["blocked_source_only_routes"] == []
+    assert caps["amount_usd"] == {
+        "minimum": 1.0,
+        "maximum": None,
+        "policy": "no_business_maximum",
+    }
 
 
 @pytest.mark.parametrize(
@@ -720,10 +726,33 @@ def test_source_only_destination_rejected(dest):
 
 
 # ---- amount / endpoint hostiles ----
-@pytest.mark.parametrize("amt", [0.99, 1000.01, "5", True, float("nan"), None])
+@pytest.mark.parametrize("amt", [0.99, "5", True, float("nan"), float("inf"), None])
 def test_amount_rejected(amt):
     with pytest.raises(AssetFareError):
         client({}).get_quote("solana", "SOL", "base", "ETH", amt)
+
+
+@pytest.mark.parametrize("amt", [1000.01, 5000])
+def test_amount_above_former_business_maximum_accepted(amt):
+    quote = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", amt))
+    result = client({"/v2/quote": quote}).get_quote("solana", "SOL", "base", "ETH", amt)
+    assert result["amount_usd"] == amt
+
+
+@pytest.mark.parametrize(
+    "amount_policy",
+    [
+        None,
+        {"minimum": 0, "maximum": None, "policy": "no_business_maximum"},
+        {"minimum": 1, "maximum": 1000, "policy": "no_business_maximum"},
+        {"minimum": 1, "maximum": None, "policy": "capped"},
+    ],
+)
+def test_capabilities_rejects_invalid_amount_policy(amount_policy):
+    caps = valid_caps()
+    caps["amount_usd"] = amount_policy
+    with pytest.raises(AssetFareError, match="assetfare_amount_policy_invalid"):
+        client({"/v2/capabilities": caps, "/v2/status": valid_status()}).get_capabilities()
 
 
 def test_unsupported_endpoint_rejected():
@@ -836,7 +865,7 @@ def test_prepare_bundle_unsafe_rejected():
 
 # ---- session lifecycle happy path ----
 def test_session_lifecycle_happy_path():
-    c, up = stateful()
+    c, _up = stateful()
     cap = new_session_capability()["session_token"]
     created = c.session_create(
         True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "create-0001"
@@ -860,7 +889,7 @@ def test_session_get_missing_token_rejected_before_network():
 
 
 def test_session_get_wrong_token_rejected():
-    c, up = stateful()
+    c, _up = stateful()
     cap = new_session_capability()["session_token"]
     created = c.session_create(
         True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "create-0001"
@@ -871,7 +900,7 @@ def test_session_get_wrong_token_rejected():
 
 
 def test_session_replay_same_token_and_key_same_session():
-    c, up = stateful()
+    c, _up = stateful()
     cap = new_session_capability()["session_token"]
     a = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "key-0001")
     b = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap, "key-0001")
@@ -880,7 +909,7 @@ def test_session_replay_same_token_and_key_same_session():
 
 
 def test_session_different_token_same_key_independent_session():
-    c, up = stateful()
+    c, _up = stateful()
     cap1 = new_session_capability()["session_token"]
     cap2 = new_session_capability()["session_token"]
     a = c.session_create(True, "base", "USDC", "arbitrum", "USDC", 25, wallets_for("base", "arbitrum"), cap1, "key-0001")
@@ -891,7 +920,7 @@ def test_session_different_token_same_key_independent_session():
 def test_session_lost_create_response_retry_same_session():
     # The caller owns the token; retrying a lost create with the same token + key
     # recovers the same session (no duplicate).
-    c, up = stateful()
+    c, _up = stateful()
     cap = new_session_capability()["session_token"]
     first = c.session_create(
         True, "arbitrum", "USDC", "base", "USDC", 30, wallets_for("arbitrum", "base"), cap, "lost-0001"
@@ -912,7 +941,7 @@ def test_session_create_caller_approved_gate():
 
 
 def test_session_create_source_only_execution_ready():
-    c, up = stateful()
+    c, _up = stateful()
     cap = new_session_capability()["session_token"]
     created = c.session_create(
         True, "polygon", "USDC", "base", "USDC", 25, wallets_for("polygon", "base"), cap, "source-key"
@@ -938,7 +967,7 @@ def test_session_expired_refresh_recovers():
 
 
 def test_invalid_session_token_format_rejected():
-    c, up = stateful()
+    c, _up = stateful()
     with pytest.raises(AssetFareError):
         c.session_get("short", "00000000-0000-4000-8000-000000000001")
     with pytest.raises(AssetFareError):
@@ -947,10 +976,10 @@ def test_invalid_session_token_format_rejected():
 
 # ---- 76-route multi-step MOCK e2e matrix: all 76 complete ------------------
 def test_e2e_76_route_matrix_all_complete():
-    c, up = stateful()
+    c, _up = stateful()
     completed = 0
     for i, (fc, ft, tc, tt) in enumerate(all_routes()):
-        tag = "{:03d}".format(i)
+        tag = f"{i:03d}"
         wallets = wallets_for(fc, tc)
         cap = new_session_capability()["session_token"]
         created = c.session_create(True, fc, ft, tc, tt, 10, wallets, cap, f"matrix-{tag}")

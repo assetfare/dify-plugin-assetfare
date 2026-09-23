@@ -87,7 +87,6 @@ _EXPECTED_ROUTES = 76  # directed quote-discovery routes (6-chain surface)
 _EXECUTION_READY_ROUTES = 76
 _PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
-_MAX_USD = 1000.0
 
 # ---- Caller-operated non-custodial v2 action contract (fixed origin) --------
 _PREPARE_URL = "https://api.assetfare.dev/v2/prepare"
@@ -546,7 +545,7 @@ class AssetFareClient:
         ):
             raise AssetFareError("assetfare_amount_invalid")
         amount = float(amount_usd)
-        if not (_MIN_USD <= amount <= _MAX_USD):
+        if amount < _MIN_USD:
             raise AssetFareError("assetfare_amount_out_of_range")
         return amount
 
@@ -602,6 +601,17 @@ class AssetFareClient:
         blocked = caps.get("blocked_source_only_routes")
         if not isinstance(blocked, list) or blocked:
             _fail("assetfare_safety_boundary_failed")
+        amount_policy = caps.get("amount_usd")
+        if (
+            not isinstance(amount_policy, dict)
+            or isinstance(amount_policy.get("minimum"), bool)
+            or not isinstance(amount_policy.get("minimum"), (int, float))
+            or not math.isfinite(float(amount_policy["minimum"]))
+            or float(amount_policy["minimum"]) != _MIN_USD
+            or amount_policy.get("maximum") is not None
+            or amount_policy.get("policy") != "no_business_maximum"
+        ):
+            _fail("assetfare_amount_policy_invalid")
         availability_keys={"execution_implemented_routes","currently_prepare_ready_routes","temporarily_unavailable_routes","temporarily_unavailable_route_count","execution_availability"}
         present=availability_keys & set(caps)
         if present and present!=availability_keys:
@@ -626,8 +636,11 @@ class AssetFareClient:
             "source_only_asset_endpoints": sorted(f"{c}:{t}" for (c, t) in _SOURCE_ONLY_ENDPOINTS),
             "source_only_routes": sorted(_SOURCE_ONLY_ROUTES),
             "blocked_source_only_routes": [],
-            "amount_usd_min": _MIN_USD,
-            "amount_usd_max": _MAX_USD,
+            "amount_usd": {
+                "minimum": _MIN_USD,
+                "maximum": None,
+                "policy": "no_business_maximum",
+            },
             "quote_only_discovery": True,
             "server_signs_or_submits": False,
         }

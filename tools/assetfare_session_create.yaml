@@ -72,10 +72,9 @@ parameters:
     required: true
     form: llm
     label: {en_US: Amount (USD), zh_Hans: 金额（美元）}
-    human_description: {en_US: Notional in USD, 1 to 1000 inclusive., zh_Hans: 名义金额（美元），1 到 1000（含）。}
-    llm_description: notional in USD, between 1 and 1000 inclusive
+    human_description: {en_US: Finite numeric notional in USD, minimum 1; no business maximum., zh_Hans: 美元名义金额，须为有限数值且最低为 1；无业务上限。}
+    llm_description: finite numeric notional in USD, minimum 1; no business maximum
     min: 1
-    max: 1000
   - name: wallets
     type: string
     required: true

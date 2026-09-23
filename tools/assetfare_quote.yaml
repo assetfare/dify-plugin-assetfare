@@ -6,9 +6,9 @@ identity:
     zh_Hans: 查询 AssetFare 路由报价
 description:
   human:
-    en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (USD 1-1000). Read-only; no wallet, signing, or submission.
-    zh_Hans: 获取一次包含费用的非托管跨链报价（1-1000 美元）。只读；无钱包、签名或提交。
-  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a USD 1-1000 route. AssetFare service fee is 1bp but is not total cost. Only after explicit approval follow the returned unsigned-action handoff. Never signs or submits.
+    en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (finite USD amount, minimum 1; no business maximum). Read-only; no wallet, signing, or submission.
+    zh_Hans: 获取一次包含费用的非托管跨链报价（有限数值，最低 1 美元；无业务上限）。只读；无钱包、签名或提交。
+  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a finite USD amount of at least 1, with no business maximum. AssetFare service fee is 1bp but is not total cost. Only after explicit approval follow the returned unsigned-action handoff. Never signs or submits.
 parameters:
   - name: from_chain
     type: select
@@ -90,11 +90,10 @@ parameters:
       en_US: Amount (USD)
       zh_Hans: 金额（美元）
     human_description:
-      en_US: Notional amount in USD, between 1 and 1000 inclusive.
-      zh_Hans: 名义金额（美元），介于 1 到 1000（含）。
-    llm_description: notional in USD, between 1 and 1000 inclusive
+      en_US: Finite numeric notional amount in USD, minimum 1; no business maximum.
+      zh_Hans: 美元名义金额，须为有限数值且最低为 1；无业务上限。
+    llm_description: finite numeric notional in USD, minimum 1; no business maximum
     min: 1
-    max: 1000
 extra:
   python:
     source: tools/assetfare_quote.py

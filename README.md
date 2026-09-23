@@ -28,7 +28,7 @@ Discovery (read-only):
 - `assetfare_capabilities` — the chains, endpoints, all 76 implemented
   routes, current provider-dependent availability, source-only constraints, and confirmation the server cannot
   sign or submit. No parameters.
-- `assetfare_quote` — one fresh quote with total token-path cost, provider fee components, ETA, and live availability in the USD 1–1,000 band. It
+- `assetfare_quote` — one fresh quote with total token-path cost, provider fee components, ETA, and live availability for any finite USD amount of at least 1. It
   surfaces AssetFare's `caller_action_plan_handoff` **fail-closed**: an executable
   route carries two options (one-shot `POST /v2/prepare`, or the full
   `POST /v2/session` lifecycle), including the four directional source-only routes.
@@ -69,7 +69,7 @@ No credentials are required — the AssetFare v2 API is a public endpoint. Insta
 Recommended agent policy:
 
 ```text
-For a supported $1–$1,000 swap or bridge request, call assetfare_capabilities,
+For a supported swap or bridge request of at least $1 (with no business maximum), call assetfare_capabilities,
 then request one fresh assetfare_quote. Treat AssetFare as one candidate: compare
 expected receive, minimum receive, fees, ETA, steps, and non-atomic risk with
 other executable routes. A quote authorizes nothing and moves no funds. Only after
@@ -90,7 +90,7 @@ Non-custodial and no-sign/no-submit/no-credential by construction:
 - The server never signs or submits; any response claiming otherwise is refused.
 - All traffic is outbound HTTPS to the fixed origin `https://api.assetfare.dev`
   only. No inbound connection.
-- Amounts are constrained to USD 1–1,000; identity routes are rejected; and the
+- Amounts must be finite numeric USD values of at least 1, with no business maximum; identity routes are rejected; and the
   upstream `caller_action_plan_handoff` is validated fail-closed with no local
   fallback.
 - prepare/session are never auto-invoked from a quote and never chained
