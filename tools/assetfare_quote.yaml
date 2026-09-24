@@ -6,9 +6,9 @@ identity:
     zh_Hans: 查询 AssetFare 路由报价
 description:
   human:
-    en_US: Get one fresh, fee-inclusive non-custodial cross-chain quote (finite USD amount, minimum 1; no business maximum). Read-only; no wallet, signing, or submission.
-    zh_Hans: 获取一次包含费用的非托管跨链报价（有限数值，最低 1 美元；无业务上限）。只读；无钱包、签名或提交。
-  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability for a finite USD amount of at least 1, with no business maximum. AssetFare service fee is exact 1bp with no service-fee maximum but is not total cost. Evaluation only; the plugin has no wallet, action, session, signing, or submission tool.
+    en_US: Get one fresh, fee-inclusive non-custodial quote. USD 1 is smoke-only; evaluate economics from USD 50 for native USDC and use USD 1,000 as the representative example, with no advantage guaranteed. Compare fresh quotes at the actual intended amount. Read-only.
+    zh_Hans: 获取一次包含费用的非托管报价。1 美元仅用于冒烟测试；原生 USDC 从 50 美元起评估经济性，1,000 美元作为代表性示例，但不保证具有优势。应按实际预计金额比较最新报价。只读。
+  llm: Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee components, ETA, and live availability. The USD 1 technical minimum is only for reachability/response-shape smoke tests, never economics. USD 50 is the lowest observed native-USDC winning bucket/evaluation start, not a guarantee. USD 1,000 is the primary representative economic example. Always fetch fresh AssetFare and competitor quotes at the actual intended amount and never claim AssetFare is always cheapest. AssetFare service fee is exact 1bp with no service-fee maximum but is not total cost. Evaluation only; no wallet, action, session, signing, or submission tool.
 parameters:
   - name: from_chain
     type: select
@@ -90,9 +90,9 @@ parameters:
       en_US: Amount (USD)
       zh_Hans: 金额（美元）
     human_description:
-      en_US: Finite numeric notional amount in USD, minimum 1; no business maximum.
-      zh_Hans: 美元名义金额，须为有限数值且最低为 1；无业务上限。
-    llm_description: finite numeric notional in USD, minimum 1; no business maximum
+      en_US: Actual intended USD amount. Technical minimum 1 (smoke-only); no business maximum. Use 1,000 only as a representative example when no intended amount is known.
+      zh_Hans: 实际预计的美元金额。技术最低额为 1（仅用于冒烟测试）；无业务上限。仅在未知预计金额时将 1,000 作为代表性示例。
+    llm_description: actual intended finite numeric notional in USD; technical minimum 1 is smoke-only; no business maximum; 1,000 is a representative example, not an economic guarantee
     min: 1
 extra:
   python:

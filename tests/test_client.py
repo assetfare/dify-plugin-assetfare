@@ -28,6 +28,24 @@ REQUEST_FIELDS = [
 EVM = "0x" + "a" * 40
 SOL = "So11111111111111111111111111111111111111112"
 
+EVALUATION_GUIDANCE = {
+    "schema_version": 1,
+    "route_minimum_usd": 1,
+    "reachability_smoke_usd": 1,
+    "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
+    "native_usdc_economic_evaluation_start_usd": 50,
+    "representative_economic_evaluation_usd": 1000,
+    "sol_input_representative_evaluation_usd": 1000,
+    "sol_input_caveat": (
+        "SOL-input routes add a source swap, so compare their full fee-inclusive route economics separately."
+    ),
+    "evidence_as_of": "2026-09-23",
+    "evidence_scope": "Dated Solana native USDC to Base native USDC measurements at USD 50, 250, and 1000.",
+    "not_a_minimum": True,
+    "not_guaranteed_best": True,
+    "always_compare_fresh_at_intended_amount": True,
+}
+
 
 def af(**kwargs):
     kwargs.setdefault("utcnow", lambda: FIXED_NOW)
@@ -96,6 +114,7 @@ def valid_caps():
         ],
         "blocked_source_only_routes": [],
         "amount_usd": {"minimum": 1, "maximum": None, "policy": "no_business_maximum"},
+        "evaluation_guidance": dict(EVALUATION_GUIDANCE),
     }
 
 
@@ -454,6 +473,7 @@ def test_capabilities_ok():
         "maximum": None,
         "policy": "no_business_maximum",
     }
+    assert caps["evaluation_guidance"] == EVALUATION_GUIDANCE
 
 
 @pytest.mark.parametrize(
@@ -488,6 +508,22 @@ def test_capabilities_live_availability_semantics_fail_closed(mut):
     with pytest.raises(AssetFareError):client({"/v2/capabilities":caps,"/v2/status":valid_status()}).get_capabilities()
 
 
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda c: c.pop("evaluation_guidance"),
+        lambda c: c["evaluation_guidance"].update(route_minimum_usd=True),
+        lambda c: c["evaluation_guidance"].update(evidence_as_of="2026-09-24"),
+        lambda c: c["evaluation_guidance"].update(extra=True),
+    ],
+)
+def test_capabilities_evaluation_guidance_must_match_core_exactly(mut):
+    caps = valid_caps()
+    mut(caps)
+    with pytest.raises(AssetFareError, match="assetfare_evaluation_guidance_invalid"):
+        client({"/v2/capabilities": caps, "/v2/status": valid_status()}).get_capabilities()
+
+
 # ---- quote happy path + fee surfaced ----
 def test_quote_exact_body_and_bounded_return():
     q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
@@ -504,6 +540,7 @@ def test_quote_exact_body_and_bounded_return():
     assert out["fee_collection_steps"] == [0]
     assert out["execution_supported"] is True
     assert out["source_only"] is False
+    assert out["evaluation_guidance"] == EVALUATION_GUIDANCE
     assert out["server_signs_or_submits"] is False
 
 

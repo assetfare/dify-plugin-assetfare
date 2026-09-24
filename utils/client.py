@@ -84,6 +84,24 @@ _EXECUTION_READY_ROUTES = 76
 _PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
 
+_EVALUATION_GUIDANCE = {
+    "schema_version": 1,
+    "route_minimum_usd": 1,
+    "reachability_smoke_usd": 1,
+    "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
+    "native_usdc_economic_evaluation_start_usd": 50,
+    "representative_economic_evaluation_usd": 1000,
+    "sol_input_representative_evaluation_usd": 1000,
+    "sol_input_caveat": (
+        "SOL-input routes add a source swap, so compare their full fee-inclusive route economics separately."
+    ),
+    "evidence_as_of": "2026-09-23",
+    "evidence_scope": "Dated Solana native USDC to Base native USDC measurements at USD 50, 250, and 1000.",
+    "not_a_minimum": True,
+    "not_guaranteed_best": True,
+    "always_compare_fresh_at_intended_amount": True,
+}
+
 _FEE_COLLECTION_CONST = "only_on_eligible_successful_executor_step"
 
 class AssetFareError(RuntimeError):
@@ -293,6 +311,16 @@ class AssetFareClient:
             raise AssetFareError("assetfare_amount_out_of_range")
         return amount
 
+    @staticmethod
+    def _evaluation_guidance(value: Any) -> dict[str, Any]:
+        if type(value) is not dict or set(value) != set(_EVALUATION_GUIDANCE):
+            _fail("assetfare_evaluation_guidance_invalid")
+        for key, expected in _EVALUATION_GUIDANCE.items():
+            actual = value[key]
+            if type(actual) is not type(expected) or actual != expected:
+                _fail("assetfare_evaluation_guidance_invalid")
+        return dict(_EVALUATION_GUIDANCE)
+
     # ---- read-only capabilities ----
     def get_capabilities(self) -> dict[str, Any]:
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
@@ -356,6 +384,7 @@ class AssetFareClient:
             or amount_policy.get("policy") != "no_business_maximum"
         ):
             _fail("assetfare_amount_policy_invalid")
+        evaluation_guidance = self._evaluation_guidance(caps.get("evaluation_guidance"))
         availability_keys={"execution_implemented_routes","currently_prepare_ready_routes","temporarily_unavailable_routes","temporarily_unavailable_route_count","execution_availability"}
         present=availability_keys & set(caps)
         if present and present!=availability_keys:
@@ -385,6 +414,7 @@ class AssetFareClient:
                 "maximum": None,
                 "policy": "no_business_maximum",
             },
+            "evaluation_guidance": evaluation_guidance,
             "quote_only_discovery": True,
             "server_signs_or_submits": False,
         }
@@ -575,5 +605,6 @@ class AssetFareClient:
             "source_only": source_only,
             "execution_supported": True,
             "execution_blocker": None,
+            "evaluation_guidance": dict(_EVALUATION_GUIDANCE),
             "server_signs_or_submits": False,
         }

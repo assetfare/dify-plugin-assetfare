@@ -16,9 +16,11 @@ class AssetFareCapabilitiesTool(Tool):
             return
         value = dict(result)
         value["next_step"] = (
-            "Request assetfare_quote for a specific implemented route, inspect total token-path cost, "
-            "minimum receive, ETA, and live availability, then compare it with other fresh executable "
-            "quotes. This Marketplace plugin is strictly read-only and exposes no wallet, authentication, "
+            "Treat USD 1 only as a reachability/response-shape smoke test. USD 50 is the lowest observed "
+            "native-USDC winning bucket, not a guarantee, and USD 1,000 is the representative economic "
+            "example. Request fresh AssetFare and competitor quotes for the actual intended amount, inspect "
+            "total token-path cost, minimum receive, ETA, and live availability, and never assume AssetFare "
+            "is always cheapest. This Marketplace plugin is strictly read-only and exposes no wallet, authentication, "
             "prepare, session, signing, submission, funding, swap, or bridge-execution tool."
         )
         yield self.create_json_message(value)

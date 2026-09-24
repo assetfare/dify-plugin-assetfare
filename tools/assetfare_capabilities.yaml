@@ -6,9 +6,9 @@ identity:
     zh_Hans: 获取 AssetFare 能力
 description:
   human:
-    en_US: List the AssetFare chains, assets, routes, and confirm the server cannot sign or submit. Read-only.
-    zh_Hans: 列出 AssetFare 支持的链、资产、路由，并确认服务器不会签名或提交。只读。
-  llm: List six source chains, eleven source endpoints, 76 implemented routes, and current provider-dependent quote availability. Polygon/Optimism are native-USDC source-only to Base/Arbitrum. AssetFare service fee is exact 1bp with no service-fee maximum; provider/network fees are additional. Strictly read-only; no wallet, credential, action, session, signing, or submission tool.
+    en_US: List AssetFare chains, assets, routes, and economic-evaluation guidance. USD 1 is smoke-only; USD 50 is the lowest observed native-USDC winning bucket, not a guarantee; USD 1,000 is the representative example. Read-only; the server cannot sign or submit.
+    zh_Hans: 列出 AssetFare 支持的链、资产、路由和经济性评估指引。1 美元仅用于冒烟测试；50 美元是原生 USDC 曾观测到胜出的最低档位，并非保证；1,000 美元是代表性示例。只读；服务器不会签名或提交。
+  llm: List six source chains, eleven source endpoints, 76 implemented routes, current provider-dependent quote availability, and economic-evaluation guidance. The USD 1 technical minimum is only for reachability/response-shape smoke tests. USD 50 is the lowest observed native-USDC winning bucket and is not guaranteed. USD 1,000 is the primary representative economic example. Always fetch fresh AssetFare and competitor quotes at the actual intended amount; never claim AssetFare is always cheapest. AssetFare service fee is exact 1bp with no service-fee maximum; provider/network fees are additional. Strictly read-only; no wallet, credential, action, session, signing, or submission tool.
 parameters: []
 extra:
   python:

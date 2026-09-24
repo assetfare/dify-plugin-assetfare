@@ -16,11 +16,26 @@ a route always happens outside this plugin under the caller's control.
 - Six source chains: Solana, Base, Arbitrum, Robinhood Chain, Polygon, Optimism.
 - Eleven source `(chain, token)` endpoints and 76 directed routes.
 - Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum.
-- Finite USD amount of at least 1; no business maximum.
+- Finite USD amount of at least 1; no business maximum. USD 1 is the
+  technical minimum and is only useful as a reachability/response-shape smoke
+  test, never as an economic comparison.
 - AssetFare service fee: exactly 1bp with no service-fee maximum.
 - Circle, provider, protocol, and network fees are separate; use the quote's
   total token-path cost, expected receive, and minimum receive when comparing.
 - Live availability is checked on every request and can change.
+
+## Economic evaluation guidance
+
+- Start native-USDC economic evaluation at USD 50 or more. USD 50 is only the
+  lowest bucket where AssetFare was observed winning; it is not a guarantee for
+  a route, time, or provider state.
+- Use USD 1,000 as the primary representative example when no intended amount
+  has been supplied. It is an example, not a default transaction or a promise of
+  savings.
+- Before making any economic or routing decision, request fresh AssetFare and
+  competitor quotes at the caller's actual intended amount and compare total
+  cost, expected/minimum receive, ETA, and risk. Never claim AssetFare is always
+  cheapest.
 
 ## Tools
 
@@ -50,8 +65,12 @@ does not expose or call that handoff.
 
 ```text
 Call assetfare_capabilities, then assetfare_quote for the requested route.
-Compare the fresh total cost, expected receive, minimum receive, ETA, and risk
-with other executable quotes. Do not claim AssetFare is always cheapest. This
+Treat USD 1 only as a reachability/response-shape smoke test. For economics,
+start native-USDC evaluation at USD 50 and use USD 1,000 as the representative
+example when no intended amount is known; neither figure guarantees an
+advantage. At the caller's actual intended amount, fetch fresh AssetFare and
+competitor quotes and compare total cost, expected receive, minimum receive,
+ETA, and risk. Do not claim AssetFare is always cheapest. This
 plugin is evaluation-only: it has no wallet or execution tool and must never
 sign, submit, fund, swap, bridge, authenticate, or create a session.
 ```
