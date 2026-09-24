@@ -1,4 +1,4 @@
-version: 0.0.10
+version: 0.0.11
 type: plugin
 author: odaiin
 name: assetfare
@@ -7,8 +7,8 @@ label:
   zh_Hans: AssetFare
 created_at: "2026-09-17T00:00:00Z"
 description:
-  en_US: Strictly read-only non-custodial capabilities and fee-inclusive quotes across six source chains and 76 routes. Every quote includes a validated, ordered direct-route summary showing each protocol, endpoint, base-unit amount, and the exact one step charging the 1bp fee. AssetFare uses no market-wide route-aggregator API; Across routes are labeled external_intent because Across may internally source or aggregate destination liquidity. USD 1 is the technical minimum and smoke-only; USD 50 is the lowest observed native-USDC winning bucket, not a guarantee; USD 1,000 is the representative economic example. Compare fresh AssetFare and competitor quotes at the actual intended amount; AssetFare is not always cheapest. Provider/network fees additional. No wallet or execution tools.
-  zh_Hans: 严格只读的非托管能力与含费报价，覆盖六个源链和 76 条路由。每个报价都包含经过验证且按顺序排列的直接路由摘要，展示每一步协议、端点、基础单位金额，以及收取精确 1bp 费用的唯一一步。AssetFare 不调用全市场路由聚合 API；Across 路由标记为 external_intent，因为 Across 可能在内部寻找或聚合目标端流动性。1 美元是技术最低额，仅用于可达性和响应结构冒烟测试；50 美元是原生 USDC 曾观测到胜出的最低档位，并非保证；1,000 美元是代表性经济性示例。应按实际预计金额获取 AssetFare 与竞争对手的最新报价并比较；AssetFare 并非始终最便宜。提供商/网络费另计。不提供钱包或执行工具。
+  en_US: Strictly read-only non-custodial capabilities and fee-inclusive quotes across six source chains and 76 routes. Every quote includes a validated ordered direct-route summary showing each protocol, endpoint, base-unit amount, and exact 1bp fee step. AssetFare uses no market-wide route-aggregator API; Across routes disclose that the provider may internally source liquidity. A sanitized continuation_v3 descriptor exposes only the quote ID/fingerprint, expiry, unranked status, required wallet chains/event signer, permitted mode, and full OpenAPI URL. The plugin never selects a mode, creates approval_v3, collects a wallet, or calls prepare/session; caller_approved alone is not human proof and legacy handoff is advisory. USD 1 is the technical minimum and smoke-only; USD 50 is the lowest observed native-USDC winning bucket, not a guarantee; USD 1,000 is the representative economic example. Compare fresh quotes at the actual intended amount; AssetFare is not always cheapest. No wallet or execution tools.
+  zh_Hans: 严格只读的非托管能力与含费报价，覆盖六个源链和 76 条路由。每个报价都包含经过验证且按顺序排列的直接路由摘要，展示协议、端点、基础单位金额和精确 1bp 收费步骤；Across 会披露提供商内部流动性来源。经过净化的 continuation_v3 描述符仅公开报价 ID/指纹、到期时间、未排名状态、所需钱包链/事件签名者、允许模式和完整 OpenAPI URL。插件不会选择模式、生成 approval_v3、收集钱包或调用 prepare/session；caller_approved 本身不是人工批准证明，旧 handoff 仅供参考。1 美元是技术最低额且仅用于冒烟测试；50 美元是原生 USDC 曾观测到胜出的最低档位，并非保证；1,000 美元是代表性示例。应按实际金额比较最新报价；AssetFare 并非始终最便宜。不提供钱包或执行工具。
 icon: icon.svg
 repo: https://github.com/assetfare/dify-plugin-assetfare
 contact: support@assetfare.dev
@@ -25,7 +25,7 @@ plugins:
   tools:
     - provider/assetfare.yaml
 meta:
-  version: 0.0.10
+  version: 0.0.11
   minimum_dify_version: 1.4.0
   arch:
     - amd64

@@ -10,7 +10,7 @@ description:
     zh_Hans: 获取一次包含费用的非托管报价，并附带经过验证且按顺序排列的直接路由摘要，展示协议、端点、基础单位金额和精确 1bp 的收费步骤。AssetFare 不调用全市场路由聚合 API；Across external_intent 路由可能在内部寻找或聚合目标端流动性。1 美元仅用于冒烟测试；原生 USDC 从 50 美元起评估经济性，1,000 美元作为代表性示例，但不保证具有优势。应按实际预计金额比较最新报价。只读。
   llm: >-
     Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee
-    components, ETA, live availability, and direct_route_summary. Treat direct_route_summary as the validated
+    components, ETA, live availability, direct_route_summary, and a sanitized continuation_descriptor. Treat direct_route_summary as the validated
     ordered path: every step names the protocol, normalized endpoints, expected/minimum base-unit inputs and
     outputs, direct-versus-external classification, and the one exact 1bp fee index.
     route_aggregator_used=false means AssetFare did not call a market-wide aggregator API; external_intent
@@ -18,7 +18,10 @@ description:
     AssetFare aggregator call. The USD 1 technical minimum is only for reachability/response-shape smoke tests,
     never economics. USD 50 is the lowest observed native-USDC winning bucket/evaluation start, not a guarantee.
     USD 1,000 is the primary representative economic example. Always fetch fresh AssetFare and competitor
-    quotes at the actual intended amount and never claim AssetFare is always cheapest. Evaluation only; no
+    quotes at the actual intended amount and never claim AssetFare is always cheapest. The descriptor exposes
+    an unranked expiring quote binding, wallet-chain/event-signer requirements, permitted mode, and the full
+    OpenAPI URL. This tool never generates approval_v3, selects a mode, collects wallets, or calls prepare/session;
+    caller_approved alone is not proof of human approval and legacy handoff is advisory. Evaluation only; no
     wallet, action, session, signing, or submission tool.
 parameters:
   - name: from_chain

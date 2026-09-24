@@ -23,5 +23,6 @@ class AssetFareQuoteTool(Tool):
         # The client validates the upstream non-custodial handoff as a safety
         # assertion, but this Marketplace plugin exposes no action/session tool and
         # never calls it. It returns the fresh fee-inclusive quote plus the
-        # strictly validated, ordered direct_route_summary projection.
+        # strictly validated ordered route and sanitized continuation descriptor.
+        # It never generates approval_v3, selects a mode, or collects wallets.
         yield self.create_json_message(dict(result))

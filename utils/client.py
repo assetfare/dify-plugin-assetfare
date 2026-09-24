@@ -15,13 +15,17 @@ Kept free of the Dify SDK so it can be unit-tested offline.
 from __future__ import annotations
 
 import contextlib
+import copy
+import hashlib
 import json
 import math
 import re
+import struct
 import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -165,6 +169,84 @@ _DIRECT_SUMMARY_STEP_KEYS = frozenset(
     }
 )
 _POSITIVE_BASE_AMOUNT_STRING = re.compile(r"[1-9][0-9]*\Z")
+_HASH = re.compile(r"[0-9a-f]{64}\Z")
+_CONTINUATION_VERSION = "assetfare-quote-bound-continuation-v3"
+_OPENAPI_URL = "https://api.assetfare.dev/v2/openapi"
+_QUOTE_PAYLOAD_SHA256_SPEC = (
+    "sha256(AssetFare typed-canonical-v1 bytes of the quote without continuation_v3 after exact base-unit "
+    "substitution: n=null; t/f=boolean; d=<IEEE-754 binary64 big-endian 16 lowercase hex> for each finite JSON "
+    "number; s=<UTF-8 byte length>:<Unicode scalar text with lone surrogates forbidden>; a=<count>:[items]; "
+    "o=<count>:{UTF-8-byte-sorted string-key/value pairs}; every non-substituted integral JSON number must be "
+    "within +/-9007199254740991; substituted paths are "
+    "intent.estimated_input_base, route.input_base, route.expected_output_base, route.minimum_output_base, and "
+    "every route.steps[i].expected_input_base/floor_input_base/expected_output_base/minimum_output_base from "
+    "direct_route_summary exact decimal strings)"
+)
+_CONTINUATION_KEYS = frozenset(
+    {
+        "version",
+        "enforcement",
+        "selection_status",
+        "automatic_selection_forbidden",
+        "caller_approved_boolean_is_not_human_proof",
+        "quote_id",
+        "quote_fingerprint",
+        "quote_fingerprint_spec",
+        "quote_fingerprint_claim",
+        "issued_at",
+        "expires_at",
+        "ttl_seconds",
+        "intent",
+        "direct_route_summary_sha256",
+        "quote_payload_sha256",
+        "quote_payload_sha256_spec",
+        "input_base_bounds",
+        "minimum_output_base",
+        "required_wallet_chains",
+        "event_signer_public_required",
+        "step_count",
+        "recommended_mode",
+        "allowed_modes",
+        "session_header",
+        "idempotency",
+        "approval_v3_required_fields",
+        "legacy_handoff_enforcement",
+        "server_signing",
+        "server_submission",
+    }
+)
+_FINGERPRINT_CLAIM_KEYS = frozenset(
+    {
+        "version",
+        "quote_id",
+        "issued_at",
+        "expires_at",
+        "ttl_seconds",
+        "intent",
+        "direct_route_summary_sha256",
+        "quote_payload_sha256",
+        "quote_payload_sha256_spec",
+        "input_base_bounds",
+        "minimum_output_base",
+        "required_wallet_chains",
+        "event_signer_public_required",
+        "step_count",
+        "allowed_modes",
+        "server_signing",
+        "server_submission",
+    }
+)
+_APPROVAL_FIELDS = [
+    "direct_route_summary_sha256",
+    "idempotency_key",
+    "maximum_input_base",
+    "minimum_output_base",
+    "quote_fingerprint",
+    "quote_id",
+    "selected_mode",
+    "selection_status",
+    "version",
+]
 
 class AssetFareError(RuntimeError):
     """Fixed, bounded error. Never carries an upstream message or a cause."""
@@ -617,6 +699,267 @@ class AssetFareClient:
             _fail("assetfare_direct_route_summary_invalid")
         return dict(value)
 
+    @staticmethod
+    def _canonical_sha256(value: Any) -> str:
+        return hashlib.sha256(
+            json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _typed_canonical(value: Any) -> bytes:
+        if value is None:
+            return b"n"
+        if value is True:
+            return b"t"
+        if value is False:
+            return b"f"
+        if isinstance(value, int):
+            if abs(value) > 9_007_199_254_740_991:
+                _fail("assetfare_continuation_v3_invalid")
+            return b"d" + struct.pack(">d", float(value)).hex().encode("ascii")
+        if isinstance(value, float):
+            if not math.isfinite(value) or (value.is_integer() and abs(value) > 9_007_199_254_740_991):
+                _fail("assetfare_continuation_v3_invalid")
+            return b"d" + struct.pack(">d", value).hex().encode("ascii")
+        if isinstance(value, str):
+            if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+                _fail("assetfare_continuation_v3_invalid")
+            encoded = value.encode("utf-8")
+            return b"s" + str(len(encoded)).encode("ascii") + b":" + encoded
+        if isinstance(value, list):
+            return (
+                b"a"
+                + str(len(value)).encode("ascii")
+                + b":["
+                + b"".join(AssetFareClient._typed_canonical(item) for item in value)
+                + b"]"
+            )
+        if isinstance(value, dict):
+            if any(
+                not isinstance(key, str)
+                or any(0xD800 <= ord(character) <= 0xDFFF for character in key)
+                for key in value
+            ):
+                _fail("assetfare_continuation_v3_invalid")
+            items = sorted(value.items(), key=lambda item: item[0].encode("utf-8"))
+            return (
+                b"o"
+                + str(len(items)).encode("ascii")
+                + b":" + b"{"
+                + b"".join(
+                    AssetFareClient._typed_canonical(key) + AssetFareClient._typed_canonical(item)
+                    for key, item in items
+                )
+                + b"}"
+            )
+        _fail("assetfare_continuation_v3_invalid")
+
+    @classmethod
+    def _quote_payload_projection(
+        cls, quote: dict[str, Any], direct_route_summary: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = copy.deepcopy({key: item for key, item in quote.items() if key != "continuation_v3"})
+        try:
+            summary_steps = direct_route_summary["steps"]
+            route = payload["route"]
+            raw_steps = route["steps"]
+            intent = payload["intent"]
+            if not isinstance(summary_steps, list) or not summary_steps or len(raw_steps) != len(summary_steps):
+                raise ValueError
+            intent["estimated_input_base"] = summary_steps[0]["expected_input_base"]
+            route["input_base"] = summary_steps[0]["expected_input_base"]
+            route["expected_output_base"] = summary_steps[-1]["expected_output_base"]
+            route["minimum_output_base"] = summary_steps[-1]["minimum_output_base"]
+            for raw, exact in zip(raw_steps, summary_steps, strict=True):
+                raw["expected_input_base"] = exact["expected_input_base"]
+                raw["floor_input_base"] = exact["minimum_input_base"]
+                raw["expected_output_base"] = exact["expected_output_base"]
+                raw["minimum_output_base"] = exact["minimum_output_base"]
+        except (KeyError, TypeError, ValueError):
+            _fail("assetfare_continuation_v3_invalid")
+        return payload
+
+    @classmethod
+    def _quote_payload_sha256(cls, quote: dict[str, Any], direct_route_summary: dict[str, Any]) -> str:
+        return hashlib.sha256(cls._typed_canonical(cls._quote_payload_projection(quote, direct_route_summary))).hexdigest()
+
+    @classmethod
+    def _validate_continuation_v3(
+        cls,
+        value: Any,
+        *,
+        quote: dict[str, Any],
+        intent: dict[str, Any],
+        route: dict[str, Any],
+        direct_route_summary: dict[str, Any],
+        current_time: datetime,
+    ) -> dict[str, Any]:
+        """Validate the complete v3 quote binding, then return only safe discovery metadata.
+
+        This quote-only plugin deliberately does not return an approval object, collect
+        wallets, select a mode, or call prepare/session.  The descriptor is enough for
+        an agent to understand the separate caller-operated continuation contract.
+        """
+        if type(value) is not dict or set(value) != _CONTINUATION_KEYS:
+            _fail("assetfare_continuation_v3_invalid")
+        claim = value.get("quote_fingerprint_claim")
+        bounds = value.get("input_base_bounds")
+        session_header = value.get("session_header")
+        idempotency = value.get("idempotency")
+        required_wallet_chains = value.get("required_wallet_chains")
+        allowed_modes = value.get("allowed_modes")
+        step_count = direct_route_summary["step_count"]
+        expected_modes = ["session"] if step_count > 1 else ["one_shot", "session"]
+        expected_recommended = "session" if step_count > 1 else "one_shot_or_session"
+        expected_wallet_chains = sorted(
+            {
+                endpoint.split(":", 1)[0]
+                for step in direct_route_summary["steps"]
+                for endpoint in (step["from"], step["to"])
+            }
+        )
+        expected_event_signer = any(
+            step["provider"] == "circle_cctp" and step["from"].startswith("solana:")
+            for step in direct_route_summary["steps"]
+        )
+        if (
+            value.get("version") != _CONTINUATION_VERSION
+            or value.get("enforcement") != "server_enforced_quote_binding"
+            or value.get("selection_status") != "unranked_candidate"
+            or value.get("automatic_selection_forbidden") is not True
+            or value.get("caller_approved_boolean_is_not_human_proof") is not True
+            or value.get("quote_id") != quote.get("quote_id")
+            or not isinstance(value.get("quote_fingerprint"), str)
+            or _HASH.fullmatch(value["quote_fingerprint"]) is None
+            or value.get("quote_fingerprint_spec")
+            != "sha256(UTF-8 sorted-key compact JSON of quote_fingerprint_claim; every numeric claim is a non-exponent decimal string)"
+            or not _int(value.get("ttl_seconds"))
+            or value["ttl_seconds"] != quote.get("ttl_seconds")
+            or value.get("intent") != intent
+            or not isinstance(value.get("direct_route_summary_sha256"), str)
+            or _HASH.fullmatch(value["direct_route_summary_sha256"]) is None
+            or not isinstance(value.get("quote_payload_sha256"), str)
+            or _HASH.fullmatch(value["quote_payload_sha256"]) is None
+            or value.get("quote_payload_sha256_spec") != _QUOTE_PAYLOAD_SHA256_SPEC
+            or not isinstance(bounds, dict)
+            or set(bounds) != {"minimum", "maximum"}
+            or bounds.get("minimum") != str(intent.get("estimated_input_base"))
+            or bounds.get("maximum") != str(intent.get("estimated_input_base"))
+            or value.get("minimum_output_base") != str(route.get("minimum_output_base"))
+            or value.get("step_count") != step_count
+            or allowed_modes != expected_modes
+            or value.get("recommended_mode") != expected_recommended
+            or value.get("approval_v3_required_fields") != _APPROVAL_FIELDS
+            or value.get("legacy_handoff_enforcement") != "legacy_advisory"
+            or value.get("server_signing") is not False
+            or value.get("server_submission") is not False
+        ):
+            _fail("assetfare_continuation_v3_invalid")
+        if (
+            not isinstance(required_wallet_chains, list)
+            or not required_wallet_chains
+            or required_wallet_chains != expected_wallet_chains
+            or value.get("event_signer_public_required") is not expected_event_signer
+            or type(session_header) is not dict
+            or set(session_header)
+            != {"name", "required_for", "caller_generated", "minimum_entropy_bits", "server_returns_raw_value"}
+            or session_header
+            != {
+                "name": "X-AssetFare-Session-Token",
+                "required_for": "session",
+                "caller_generated": True,
+                "minimum_entropy_bits": 256,
+                "server_returns_raw_value": False,
+            }
+            or type(idempotency) is not dict
+            or set(idempotency) != {"required", "field", "pattern", "scope"}
+            or idempotency
+            != {
+                "required": True,
+                "field": "idempotency_key",
+                "pattern": "^[A-Za-z0-9._:-]{8,128}$",
+                "scope": "quote_and_selected_mode",
+            }
+        ):
+            _fail("assetfare_continuation_v3_invalid")
+        if type(claim) is not dict or set(claim) != _FINGERPRINT_CLAIM_KEYS:
+            _fail("assetfare_continuation_v3_invalid")
+        try:
+            amount_decimal = format(Decimal(str(intent.get("amount_usd"))), "f")
+        except InvalidOperation:
+            _fail("assetfare_continuation_v3_invalid")
+        if "." in amount_decimal:
+            amount_decimal = amount_decimal.rstrip("0").rstrip(".")
+        if amount_decimal in ("", "-0"):
+            amount_decimal = "0"
+        expected_claim = {
+            "version": _CONTINUATION_VERSION,
+            "quote_id": value["quote_id"],
+            "issued_at": value.get("issued_at"),
+            "expires_at": value.get("expires_at"),
+            "ttl_seconds": str(value["ttl_seconds"]),
+            "intent": {
+                "from": intent.get("from"),
+                "to": intent.get("to"),
+                "amount_usd_decimal": amount_decimal,
+                "estimated_input_base": str(intent.get("estimated_input_base")),
+            },
+            "direct_route_summary_sha256": value["direct_route_summary_sha256"],
+            "quote_payload_sha256": value["quote_payload_sha256"],
+            "quote_payload_sha256_spec": _QUOTE_PAYLOAD_SHA256_SPEC,
+            "input_base_bounds": dict(bounds),
+            "minimum_output_base": value["minimum_output_base"],
+            "required_wallet_chains": list(required_wallet_chains),
+            "event_signer_public_required": value["event_signer_public_required"],
+            "step_count": str(step_count),
+            "allowed_modes": list(expected_modes),
+            "server_signing": False,
+            "server_submission": False,
+        }
+        if (
+            claim != expected_claim
+            or cls._canonical_sha256(claim) != value["quote_fingerprint"]
+            or cls._canonical_sha256(direct_route_summary) != value["direct_route_summary_sha256"]
+            or cls._quote_payload_sha256(quote, direct_route_summary) != value["quote_payload_sha256"]
+        ):
+            _fail("assetfare_continuation_v3_invalid")
+        try:
+            issued = datetime.fromisoformat(str(value.get("issued_at")))
+            expires = datetime.fromisoformat(str(value.get("expires_at")))
+        except ValueError:
+            _fail("assetfare_continuation_v3_invalid")
+        if (
+            issued.tzinfo is None
+            or expires.tzinfo is None
+            or expires <= issued
+            or abs((expires - issued).total_seconds() - value["ttl_seconds"]) > 0.001
+            or expires <= current_time
+            or issued > current_time + timedelta(seconds=_MAX_FUTURE_SKEW_S)
+        ):
+            _fail("assetfare_continuation_v3_invalid")
+        return {
+            "version": _CONTINUATION_VERSION,
+            "quote_id": value["quote_id"],
+            "quote_fingerprint": value["quote_fingerprint"],
+            "expires_at": value["expires_at"],
+            "ttl_seconds": value["ttl_seconds"],
+            "selection_status": "unranked_candidate",
+            "required_wallet_chains": list(required_wallet_chains),
+            "event_signer_public_required": value["event_signer_public_required"],
+            "allowed_modes": list(expected_modes),
+            "recommended_mode": expected_recommended,
+            "openapi_url": _OPENAPI_URL,
+            "legacy_handoff_enforcement": "legacy_advisory",
+            "automatic_selection_forbidden": True,
+            "caller_approved_boolean_is_not_human_proof": True,
+            "wallet_collection_performed": False,
+            "approval_v3_generated": False,
+            "prepare_calls": 0,
+            "session_calls": 0,
+            "server_signing": False,
+            "server_submission": False,
+        }
+
     # ---- read-only capabilities ----
     def get_capabilities(self) -> dict[str, Any]:
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
@@ -867,6 +1210,14 @@ class AssetFareClient:
             route=route,
             risk=risk,
         )
+        continuation_descriptor = self._validate_continuation_v3(
+            data.get("continuation_v3"),
+            quote=data,
+            intent=intent,
+            route=route,
+            direct_route_summary=direct_route_summary,
+            current_time=self._utcnow(),
+        )
 
         # Every supported route is execution-ready through caller-operated wallets.
         if not isinstance(execution.get("first_unsigned_action_supported"), bool):
@@ -904,6 +1255,7 @@ class AssetFareClient:
             "cost_summary": cost,
             "eta": eta_summary or {"estimated_time_seconds":eta if _int(eta) else None,"estimated_time_range_seconds":None,"complete_route_estimate":False,"sources":[],"note":"Legacy-core fallback; full ETA provenance unavailable"},
             "direct_route_summary": direct_route_summary,
+            "continuation_descriptor": continuation_descriptor,
             "non_atomic": risk["non_atomic"],
             "quote_id": data["quote_id"],
             "as_of": as_of,

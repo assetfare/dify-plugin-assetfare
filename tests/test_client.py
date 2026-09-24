@@ -1,5 +1,8 @@
+import copy
+import hashlib
 import json
 import os
+import struct
 import sys
 from datetime import UTC, datetime
 
@@ -14,6 +17,16 @@ FIXED_NOW = datetime(2026, 9, 17, 0, 0, 10, tzinfo=UTC)
 
 PREPARE_URL = "https://api.assetfare.dev/v2/prepare"
 SESSION_URL = "https://api.assetfare.dev/v2/session"
+QUOTE_PAYLOAD_SHA256_SPEC = (
+    "sha256(AssetFare typed-canonical-v1 bytes of the quote without continuation_v3 after exact base-unit "
+    "substitution: n=null; t/f=boolean; d=<IEEE-754 binary64 big-endian 16 lowercase hex> for each finite JSON "
+    "number; s=<UTF-8 byte length>:<Unicode scalar text with lone surrogates forbidden>; a=<count>:[items]; "
+    "o=<count>:{UTF-8-byte-sorted string-key/value pairs}; every non-substituted integral JSON number must be "
+    "within +/-9007199254740991; substituted paths are "
+    "intent.estimated_input_base, route.input_base, route.expected_output_base, route.minimum_output_base, and "
+    "every route.steps[i].expected_input_base/floor_input_base/expected_output_base/minimum_output_base from "
+    "direct_route_summary exact decimal strings)"
+)
 REQUEST_FIELDS = [
     "caller_approved",
     "from_chain",
@@ -299,7 +312,7 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
         "blocker": None,
     }
     handoff = executable_handoff()
-    return {
+    quote = {
         "quote_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         "status": "capped_public_agent_release",
         "as_of": "2026-09-17T00:00:00Z",
@@ -336,6 +349,158 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
         "caller_action_plan_handoff_v2": executable_handoff_v2(),
         "handoff_schema_version": 2,
     }
+    return add_continuation(quote)
+
+
+def _sha256(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
+def _typed_canonical(value):
+    if value is None:
+        return b"n"
+    if value is True:
+        return b"t"
+    if value is False:
+        return b"f"
+    if isinstance(value, int):
+        if abs(value) > 9_007_199_254_740_991:
+            raise ValueError("unsafe integer")
+        return b"d" + struct.pack(">d", float(value)).hex().encode()
+    if isinstance(value, float):
+        if value.is_integer() and abs(value) > 9_007_199_254_740_991:
+            raise ValueError("unsafe integer")
+        return b"d" + struct.pack(">d", value).hex().encode()
+    if isinstance(value, str):
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("invalid unicode")
+        encoded = value.encode()
+        return b"s" + str(len(encoded)).encode() + b":" + encoded
+    if isinstance(value, list):
+        return b"a" + str(len(value)).encode() + b":[" + b"".join(map(_typed_canonical, value)) + b"]"
+    if any(any(0xD800 <= ord(character) <= 0xDFFF for character in key) for key in value):
+        raise ValueError("invalid unicode")
+    items = sorted(value.items(), key=lambda item: item[0].encode())
+    return b"o" + str(len(items)).encode() + b":{" + b"".join(
+        _typed_canonical(key) + _typed_canonical(item) for key, item in items
+    ) + b"}"
+
+
+def _quote_payload_projection(quote):
+    value = copy.deepcopy({key: item for key, item in quote.items() if key != "continuation_v3"})
+    summary_steps = value["direct_route_summary"]["steps"]
+    raw_steps = value["route"]["steps"]
+    value["intent"]["estimated_input_base"] = summary_steps[0]["expected_input_base"]
+    value["route"]["input_base"] = summary_steps[0]["expected_input_base"]
+    value["route"]["expected_output_base"] = summary_steps[-1]["expected_output_base"]
+    value["route"]["minimum_output_base"] = summary_steps[-1]["minimum_output_base"]
+    for raw, exact in zip(raw_steps, summary_steps, strict=True):
+        raw["expected_input_base"] = exact["expected_input_base"]
+        raw["floor_input_base"] = exact["minimum_input_base"]
+        raw["expected_output_base"] = exact["expected_output_base"]
+        raw["minimum_output_base"] = exact["minimum_output_base"]
+    return value
+
+
+def add_continuation(quote):
+    quote.pop("continuation_v3", None)
+    summary = quote["direct_route_summary"]
+    ttl = quote["ttl_seconds"]
+    intent = quote["intent"]
+    chains = sorted(
+        {
+            endpoint.split(":", 1)[0]
+            for step in summary["steps"]
+            for endpoint in (step["from"], step["to"])
+        }
+    )
+    signer = any(
+        step["provider"] == "circle_cctp" and step["from"].startswith("solana:")
+        for step in summary["steps"]
+    )
+    modes = ["session"] if summary["step_count"] > 1 else ["one_shot", "session"]
+    issued_at = "2026-09-17T00:00:00.000Z"
+    expires_at = "2026-09-17T00:00:30.000Z"
+    amount_decimal = format(intent["amount_usd"], "f").rstrip("0").rstrip(".") or "0"
+    summary_hash = _sha256(summary)
+    payload_hash = hashlib.sha256(_typed_canonical(_quote_payload_projection(quote))).hexdigest()
+    bounds = {
+        "minimum": str(intent["estimated_input_base"]),
+        "maximum": str(intent["estimated_input_base"]),
+    }
+    claim = {
+        "version": "assetfare-quote-bound-continuation-v3",
+        "quote_id": quote["quote_id"],
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "ttl_seconds": str(ttl),
+        "intent": {
+            "from": intent["from"],
+            "to": intent["to"],
+            "amount_usd_decimal": amount_decimal,
+            "estimated_input_base": str(intent["estimated_input_base"]),
+        },
+        "direct_route_summary_sha256": summary_hash,
+        "quote_payload_sha256": payload_hash,
+        "quote_payload_sha256_spec": QUOTE_PAYLOAD_SHA256_SPEC,
+        "input_base_bounds": bounds,
+        "minimum_output_base": str(quote["route"]["minimum_output_base"]),
+        "required_wallet_chains": chains,
+        "event_signer_public_required": signer,
+        "step_count": str(summary["step_count"]),
+        "allowed_modes": modes,
+        "server_signing": False,
+        "server_submission": False,
+    }
+    quote["continuation_v3"] = {
+        "version": "assetfare-quote-bound-continuation-v3",
+        "enforcement": "server_enforced_quote_binding",
+        "selection_status": "unranked_candidate",
+        "automatic_selection_forbidden": True,
+        "caller_approved_boolean_is_not_human_proof": True,
+        "quote_id": quote["quote_id"],
+        "quote_fingerprint": _sha256(claim),
+        "quote_fingerprint_spec": "sha256(UTF-8 sorted-key compact JSON of quote_fingerprint_claim; every numeric claim is a non-exponent decimal string)",
+        "quote_fingerprint_claim": claim,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "ttl_seconds": ttl,
+        "intent": dict(intent),
+        "direct_route_summary_sha256": summary_hash,
+        "quote_payload_sha256": payload_hash,
+        "quote_payload_sha256_spec": QUOTE_PAYLOAD_SHA256_SPEC,
+        "input_base_bounds": bounds,
+        "minimum_output_base": str(quote["route"]["minimum_output_base"]),
+        "required_wallet_chains": chains,
+        "event_signer_public_required": signer,
+        "step_count": summary["step_count"],
+        "recommended_mode": "session" if summary["step_count"] > 1 else "one_shot_or_session",
+        "allowed_modes": modes,
+        "session_header": {
+            "name": "X-AssetFare-Session-Token",
+            "required_for": "session",
+            "caller_generated": True,
+            "minimum_entropy_bits": 256,
+            "server_returns_raw_value": False,
+        },
+        "idempotency": {
+            "required": True,
+            "field": "idempotency_key",
+            "pattern": "^[A-Za-z0-9._:-]{8,128}$",
+            "scope": "quote_and_selected_mode",
+        },
+        "approval_v3_required_fields": [
+            "direct_route_summary_sha256", "idempotency_key", "maximum_input_base",
+            "minimum_output_base", "quote_fingerprint", "quote_id", "selected_mode",
+            "selection_status", "version",
+        ],
+        "legacy_handoff_enforcement": "legacy_advisory",
+        "server_signing": False,
+        "server_submission": False,
+    }
+    return quote
 
 
 def with_cost_summary(quote):
@@ -343,7 +508,7 @@ def with_cost_summary(quote):
     ec=max(0.0,amount-expected);mc=max(0.0,amount-minimum)
     quote["cost_summary"]={"scope":"token_path_only_network_gas_excluded","input_value_usd":amount,"expected_receive_value_usd":expected,"minimum_receive_value_usd":minimum,"expected_total_cost_usd":ec,"maximum_total_cost_usd":mc,"expected_total_cost_percent":ec/amount*100,"maximum_total_cost_percent":mc/amount*100,"assetfare_service_fee":{"bps":1,"estimated_usd":min(amount/10_000,5.0),"included_in_receive_amount":True,"note":"service fee only"},"provider_fee_components":[],"unpriced_costs":["source_chain_network_fee"],"rankable_all_in":False,"small_amount_warning":mc/amount>=.01,"warning":None}
     quote["eta"]={"estimated_time_seconds":quote["offer"]["estimated_time_seconds"],"estimated_time_range_seconds":[8,23],"complete_route_estimate":True,"sources":[],"note":"estimate"}
-    return quote
+    return add_continuation(quote)
 
 
 class _Resp:
@@ -643,6 +808,31 @@ def test_quote_exact_body_and_bounded_return():
     assert [step["provider"] for step in summary["steps"]] == [
         "raydium_clmm", "circle_cctp", "uniswap_v3"
     ]
+    descriptor = out["continuation_descriptor"]
+    assert descriptor == {
+        "version": "assetfare-quote-bound-continuation-v3",
+        "quote_id": q["quote_id"],
+        "quote_fingerprint": q["continuation_v3"]["quote_fingerprint"],
+        "expires_at": "2026-09-17T00:00:30.000Z",
+        "ttl_seconds": 30,
+        "selection_status": "unranked_candidate",
+        "required_wallet_chains": ["base", "solana"],
+        "event_signer_public_required": True,
+        "allowed_modes": ["session"],
+        "recommended_mode": "session",
+        "openapi_url": "https://api.assetfare.dev/v2/openapi",
+        "legacy_handoff_enforcement": "legacy_advisory",
+        "automatic_selection_forbidden": True,
+        "caller_approved_boolean_is_not_human_proof": True,
+        "wallet_collection_performed": False,
+        "approval_v3_generated": False,
+        "prepare_calls": 0,
+        "session_calls": 0,
+        "server_signing": False,
+        "server_submission": False,
+    }
+    assert "quote_fingerprint_claim" not in descriptor
+    assert "input_base_bounds" not in descriptor
 
 
 def test_across_quote_exposes_honest_external_intent_caveat():
@@ -680,6 +870,79 @@ def test_direct_route_summary_hostiles_fail_closed(mut):
     mut(q)
     with pytest.raises(AssetFareError):
         client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q.pop("continuation_v3"),
+        lambda q: q["continuation_v3"].update(extra="forbidden"),
+        lambda q: q["continuation_v3"].update(selection_status="selected"),
+        lambda q: q["continuation_v3"].update(automatic_selection_forbidden=False),
+        lambda q: q["continuation_v3"].update(caller_approved_boolean_is_not_human_proof=False),
+        lambda q: q["continuation_v3"].update(quote_fingerprint="0" * 64),
+        lambda q: q["continuation_v3"].update(quote_payload_sha256_spec="forbidden"),
+        lambda q: q["continuation_v3"].update(required_wallet_chains=["solana"]),
+        lambda q: q["continuation_v3"].update(event_signer_public_required=False),
+        lambda q: q["continuation_v3"].update(allowed_modes=["one_shot", "session"]),
+        lambda q: q["continuation_v3"].update(recommended_mode="one_shot_or_session"),
+        lambda q: q["continuation_v3"].update(legacy_handoff_enforcement="server_enforced"),
+        lambda q: q["continuation_v3"]["input_base_bounds"].update(maximum="2"),
+        lambda q: q["continuation_v3"]["session_header"].update(server_returns_raw_value=True),
+        lambda q: q["continuation_v3"]["quote_fingerprint_claim"].update(step_count="2"),
+        lambda q: q["continuation_v3"]["quote_fingerprint_claim"].update(quote_payload_sha256_spec="forbidden"),
+        lambda q: q["continuation_v3"]["quote_fingerprint_claim"]["intent"].update(amount_usd_decimal="251"),
+        lambda q: q["continuation_v3"].update(private_key="forbidden"),
+    ],
+)
+def test_continuation_v3_hostiles_fail_closed_without_wallet_or_action_calls(mut):
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
+    mut(q)
+    mock = _Session({"/v2/quote": q})
+    with pytest.raises(AssetFareError, match="assetfare_(continuation_v3_invalid|safety_boundary_failed)"):
+        af(session=mock).get_quote("solana", "SOL", "base", "ETH", 250)
+    assert [call["url"] for call in mock.calls] == ["https://api.assetfare.dev/v2/quote"]
+
+
+def test_continuation_payload_hash_accepts_integral_float_and_base_units_above_js_safe_integer():
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 1000.0))
+    exact_output = 9_007_199_254_740_993
+    q["direct_route_summary"]["steps"][-1]["expected_output_base"] = str(exact_output)
+    q["route"]["steps"][-1]["expected_output_base"] = exact_output
+    q["route"]["expected_output_base"] = exact_output
+    add_continuation(q)
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 1000.0)
+    assert out["continuation_descriptor"]["quote_fingerprint"] == q["continuation_v3"]["quote_fingerprint"]
+
+
+def test_typed_payload_hash_preserves_number_string_and_negative_zero_and_rejects_unsafe_evidence():
+    base = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 1000.0))
+    numeric = copy.deepcopy(base)
+    string = copy.deepcopy(base)
+    negative_zero = copy.deepcopy(base)
+    positive_zero = copy.deepcopy(base)
+    numeric["route"]["steps"][0]["expected_evidence"] = {"semantic": 1}
+    string["route"]["steps"][0]["expected_evidence"] = {"semantic": "1"}
+    negative_zero["route"]["steps"][0]["expected_evidence"] = {"semantic": -0.0}
+    positive_zero["route"]["steps"][0]["expected_evidence"] = {"semantic": 0.0}
+    assert AssetFareClient._quote_payload_sha256(numeric, numeric["direct_route_summary"]) != (
+        AssetFareClient._quote_payload_sha256(string, string["direct_route_summary"])
+    )
+    assert AssetFareClient._quote_payload_sha256(negative_zero, negative_zero["direct_route_summary"]) != (
+        AssetFareClient._quote_payload_sha256(positive_zero, positive_zero["direct_route_summary"])
+    )
+    unsafe = copy.deepcopy(base)
+    unsafe["route"]["steps"][0]["expected_evidence"] = {"semantic": 500_000_000_000_000_001}
+    with pytest.raises(AssetFareError, match="assetfare_continuation_v3_invalid"):
+        AssetFareClient._quote_payload_sha256(unsafe, unsafe["direct_route_summary"])
+    unsafe_float = copy.deepcopy(base)
+    unsafe_float["route"]["steps"][0]["expected_evidence"] = {"semantic": 500_000_000_000_000_000.0}
+    with pytest.raises(AssetFareError, match="assetfare_continuation_v3_invalid"):
+        AssetFareClient._quote_payload_sha256(unsafe_float, unsafe_float["direct_route_summary"])
+    invalid_unicode = copy.deepcopy(base)
+    invalid_unicode["route"]["steps"][0]["expected_evidence"] = {"semantic": "\ud800"}
+    with pytest.raises(AssetFareError, match="assetfare_continuation_v3_invalid"):
+        AssetFareClient._quote_payload_sha256(invalid_unicode, invalid_unicode["direct_route_summary"])
 
 
 def test_robinhood_ingress_cannot_be_collusively_relabelled_direct():
@@ -725,6 +988,7 @@ def test_raw_route_secret_or_signed_claim_fails_closed(mut):
 def test_raw_provider_evidence_is_not_projected_into_normalized_summary():
     q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
     q["route"]["steps"][0]["expected_evidence"] = {"provider_raw": "opaque", "signed": False}
+    add_continuation(q)
     out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
     encoded = json.dumps(out["direct_route_summary"], sort_keys=True)
     assert "expected_evidence" not in encoded
@@ -765,6 +1029,7 @@ def test_rollback_core_large_amount_fee_is_exact_one_bp_without_maximum():
 
 def test_quote_accepts_sub_micro_usd_rounding_alignment():
     q=with_cost_summary(valid_quote("solana","SOL","base","ETH",250));q["offer"]["expected_receive_usd"]=249.1234567;q["offer"]["estimated_min_receive_usd"]=248.123456;q["cost_summary"].update(expected_receive_value_usd=249.123457,minimum_receive_value_usd=248.123456,expected_total_cost_usd=.876543,maximum_total_cost_usd=1.876544,expected_total_cost_percent=.3506172,maximum_total_cost_percent=.7506176,small_amount_warning=False,warning=None)
+    add_continuation(q)
     out=client({"/v2/quote":q}).get_quote("solana","SOL","base","ETH",250)
     assert out["cost_summary"]["expected_receive_value_usd"]==249.123457
 

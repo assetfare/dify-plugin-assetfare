@@ -26,6 +26,17 @@ a route always happens outside this plugin under the caller's control.
   machine-readable path with the exact protocol, normalized `chain:asset`
   endpoints, expected/minimum base-unit input and output for each step, and the
   single step index where the exact 1bp AssetFare fee is collected.
+- Every quote also carries a fully validated `continuation_v3`, but this
+  quote-only plugin returns only a sanitized `continuation_descriptor`: quote
+  ID/fingerprint, expiry, unranked status, required wallet chains/event signer,
+  allowed/recommended mode, and the full runtime OpenAPI URL. It never creates
+  `approval_v3`, selects a mode, collects wallet data, or calls prepare/session.
+  `caller_approved: true` alone is not proof of human approval; legacy handoff
+  metadata is advisory. Payload hashes use the REST 2.4 portable projection:
+  exact base-unit strings from `direct_route_summary` replace duplicated raw
+  numbers before typed-canonical-v1 preserves JSON types and encodes finite
+  numbers as IEEE-754 binary64; unsafe integral numbers and lone Unicode
+  surrogates fail closed.
 - Live availability is checked on every request and can change.
 
 ## Direct-route transparency

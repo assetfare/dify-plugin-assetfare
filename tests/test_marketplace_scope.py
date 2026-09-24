@@ -44,10 +44,10 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
     assert '"estimated_usd":amount/10_000' in source
 
 
-def test_manifest_is_read_only_0010_and_surfaces_route_transparency():
+def test_manifest_is_read_only_0011_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "0.0.10"
-    assert manifest["meta"]["version"] == "0.0.10"
+    assert manifest["version"] == "0.0.11"
+    assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
     assert "strictly read-only" in description
     assert "no wallet or execution tools" in description
@@ -59,6 +59,9 @@ def test_manifest_is_read_only_0010_and_surfaces_route_transparency():
     assert "ordered direct-route summary" in description
     assert "route-aggregator api" in description
     assert "across" in description and "internally" in description
+    assert "continuation_v3" in description
+    assert "never selects a mode" in description
+    assert "caller_approved alone is not human proof" in description
 
 
 def test_all_public_quote_descriptions_explain_external_intent_caveat():
