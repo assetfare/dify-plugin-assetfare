@@ -44,10 +44,10 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
     assert '"estimated_usd":amount/10_000' in source
 
 
-def test_manifest_is_read_only_008():
+def test_manifest_is_read_only_0010_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "0.0.9"
-    assert manifest["meta"]["version"] == "0.0.9"
+    assert manifest["version"] == "0.0.10"
+    assert manifest["meta"]["version"] == "0.0.10"
     description = manifest["description"]["en_US"].lower()
     assert "strictly read-only" in description
     assert "no wallet or execution tools" in description
@@ -56,7 +56,31 @@ def test_manifest_is_read_only_008():
     assert "usd 1,000 is the representative economic example" in description
     assert "actual intended amount" in description
     assert "not always cheapest" in description
-    assert "no service-fee maximum" in description
+    assert "ordered direct-route summary" in description
+    assert "route-aggregator api" in description
+    assert "across" in description and "internally" in description
+
+
+def test_all_public_quote_descriptions_explain_external_intent_caveat():
+    manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
+    provider = yaml.safe_load((ROOT / "provider/assetfare.yaml").read_text())
+    quote = yaml.safe_load((ROOT / "tools/assetfare_quote.yaml").read_text())
+    readme = (ROOT / "README.md").read_text()
+    surfaces = [
+        manifest["description"]["en_US"],
+        provider["identity"]["description"]["en_US"],
+        quote["description"]["human"]["en_US"],
+        quote["description"]["llm"],
+        readme,
+    ]
+    for surface in surfaces:
+        low = surface.lower()
+        assert "direct-route summary" in low or "direct_route_summary" in low
+        assert "1bp" in low
+        assert "across" in low
+    llm = quote["description"]["llm"].lower()
+    assert "market-wide aggregator api" in llm
+    assert "internally source or aggregate destination liquidity" in llm
 
 
 def test_manifest_economic_guidance_has_english_chinese_parity():

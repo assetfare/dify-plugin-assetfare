@@ -22,7 +22,29 @@ a route always happens outside this plugin under the caller's control.
 - AssetFare service fee: exactly 1bp with no service-fee maximum.
 - Circle, provider, protocol, and network fees are separate; use the quote's
   total token-path cost, expected receive, and minimum receive when comparing.
+- Every quote carries a fail-closed `direct_route_summary`: an ordered,
+  machine-readable path with the exact protocol, normalized `chain:asset`
+  endpoints, expected/minimum base-unit input and output for each step, and the
+  single step index where the exact 1bp AssetFare fee is collected.
 - Live availability is checked on every request and can change.
+
+## Direct-route transparency
+
+The returned `direct_route_summary` is bound to the requested corridor and the
+raw quote. The plugin rejects missing, extra, reordered, discontinuous, or
+contradictory summary fields; wrong provider/action pairs; non-string or
+non-positive base-unit amounts; more or fewer than one 1bp fee step; and any
+claim of server signing, server submission, or market-wide route aggregation.
+
+`classification=direct_protocol_only` means every step uses one of the named
+direct protocols. `classification=external_intent` is used only when the path
+contains `across_intent_bridge`. In both cases,
+`route_aggregator_used=false` means **AssetFare did not call a market-wide route
+aggregator API**. It does not claim that a provider has no internal routing:
+Across may internally source or aggregate destination liquidity, which is why
+those paths explicitly set
+`provider_internal_dex_aggregation_possible=true`. This distinction is part of
+the validated response rather than an inference an agent must make.
 
 ## Economic evaluation guidance
 
@@ -55,9 +77,10 @@ Request one fresh route quote using:
 - `to_token`
 - `amount_usd`
 
-The tool validates the response fail-closed and returns total cost, provider fee
-components, expected receive, conservative minimum receive, ETA, expiry,
-non-atomic risk, and the exact 1bp AssetFare fee. A quote authorizes nothing.
+The tool validates the response fail-closed and returns the ordered direct-route
+summary, total cost, provider fee components, expected receive, conservative
+minimum receive, ETA, expiry, non-atomic risk, and the exact 1bp AssetFare fee.
+A quote authorizes nothing.
 Although the upstream quote documents its caller-operated handoff, this plugin
 does not expose or call that handoff.
 
@@ -71,7 +94,12 @@ example when no intended amount is known; neither figure guarantees an
 advantage. At the caller's actual intended amount, fetch fresh AssetFare and
 competitor quotes and compare total cost, expected receive, minimum receive,
 ETA, and risk. Do not claim AssetFare is always cheapest. This
-plugin is evaluation-only: it has no wallet or execution tool and must never
+Read direct_route_summary before presenting a route: show its ordered protocols,
+endpoints, base-unit amounts, direct_protocol_only or external_intent
+classification, and exact 1bp fee step. Explain that route_aggregator_used=false
+describes AssetFare's own API use, while Across may internally source or
+aggregate destination liquidity. This plugin is evaluation-only: it has no
+wallet or execution tool and must never
 sign, submit, fund, swap, bridge, authenticate, or create a session.
 ```
 

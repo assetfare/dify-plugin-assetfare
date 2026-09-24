@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -103,6 +104,67 @@ _EVALUATION_GUIDANCE = {
 }
 
 _FEE_COLLECTION_CONST = "only_on_eligible_successful_executor_step"
+_DIRECT_SUMMARY_VERSION = "assetfare-direct-route-summary-v1"
+_DIRECT_SUMMARY_MODES = frozenset(
+    {
+        "same_chain_direct",
+        "same_chain_direct_composition",
+        "cctp_direct_composition",
+        "robinhood_paxos_egress_composition",
+        "robinhood_across_ingress_composition",
+        "polygon_source_cctp",
+        "optimism_source_cctp",
+    }
+)
+_DIRECT_SUMMARY_PROVIDERS = frozenset(
+    {
+        "raydium_clmm",
+        "orca_whirlpool",
+        "uniswap_v3",
+        "circle_cctp",
+        "paxos_usdg_layerzero_oft",
+        "across_intent_bridge",
+    }
+)
+_SWAP_PROVIDERS = frozenset({"raydium_clmm", "orca_whirlpool", "uniswap_v3"})
+_BRIDGE_PROVIDERS = _DIRECT_SUMMARY_PROVIDERS - _SWAP_PROVIDERS
+_DIRECT_SUMMARY_KEYS = frozenset(
+    {
+        "version",
+        "route",
+        "from",
+        "to",
+        "classification",
+        "mode",
+        "route_aggregator_used",
+        "external_intent_protocol_used",
+        "provider_internal_dex_aggregation_possible",
+        "assetfare_fee_bps",
+        "fee_collection_step_index",
+        "server_signing",
+        "server_submission",
+        "step_count",
+        "steps",
+    }
+)
+_DIRECT_SUMMARY_STEP_KEYS = frozenset(
+    {
+        "index",
+        "action",
+        "provider",
+        "from",
+        "to",
+        "expected_input_base",
+        "minimum_input_base",
+        "expected_output_base",
+        "minimum_output_base",
+        "assetfare_fee_bps",
+        "direct_protocol",
+        "external_intent_protocol",
+        "aggregator_api_used",
+    }
+)
+_POSITIVE_BASE_AMOUNT_STRING = re.compile(r"[1-9][0-9]*\Z")
 
 class AssetFareError(RuntimeError):
     """Fixed, bounded error. Never carries an upstream message or a cause."""
@@ -149,6 +211,11 @@ def _reject_signing_claims(value: Any) -> None:
             for key in ("server_signing", "server_submission"):
                 if key in node and node[key] is not False:
                     _fail("assetfare_safety_boundary_failed")
+            for key in ("signed", "submitted"):
+                if key in node and node[key] is not False:
+                    _fail("assetfare_safety_boundary_failed")
+            if {"private_key", "mnemonic", "seed_phrase"} & set(node):
+                _fail("assetfare_safety_boundary_failed")
             for child in node.values():
                 stack.append((child, depth + 1))
         elif isinstance(node, (list, tuple)):
@@ -320,6 +387,235 @@ class AssetFareClient:
             if type(actual) is not type(expected) or actual != expected:
                 _fail("assetfare_evaluation_guidance_invalid")
         return dict(_EVALUATION_GUIDANCE)
+
+    @staticmethod
+    def _summary_amount(value: Any) -> str:
+        if not isinstance(value, str) or _POSITIVE_BASE_AMOUNT_STRING.fullmatch(value) is None:
+            _fail("assetfare_direct_route_summary_invalid")
+        return value
+
+    @staticmethod
+    def _expected_direct_route(expected_from: str, expected_to: str) -> tuple[str, bool, list[tuple[str, str, str]]]:
+        from_chain, from_token = expected_from.split(":", 1)
+        to_chain, to_token = expected_to.split(":", 1)
+        path: list[tuple[str, str, str]] = []
+
+        def add_swap(chain: str, source: str, destination: str) -> None:
+            provider = (
+                "raydium_clmm"
+                if chain == "solana" and {source, destination} == {"SOL", "USDC"}
+                else "orca_whirlpool"
+                if chain == "solana"
+                else "uniswap_v3"
+            )
+            path.append((provider, f"{chain}:{source}", f"{chain}:{destination}"))
+
+        def add_bridge(provider: str, source: str, destination: str, source_asset: str, destination_asset: str) -> None:
+            path.append((provider, f"{source}:{source_asset}", f"{destination}:{destination_asset}"))
+
+        if from_chain in _SOURCE_ONLY_CHAINS:
+            add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
+            return f"{from_chain}_source_cctp", False, path
+        if from_chain == to_chain:
+            composed = from_chain == "solana" and {from_token, to_token} == {"SOL", "USDG"}
+            if composed:
+                add_swap("solana", from_token, "USDC")
+                add_swap("solana", "USDC", to_token)
+            else:
+                add_swap(from_chain, from_token, to_token)
+            return ("same_chain_direct_composition" if composed else "same_chain_direct"), False, path
+        if from_chain == "robinhood":
+            if from_token == "ETH":
+                add_swap("robinhood", "ETH", "USDG")
+            add_bridge("paxos_usdg_layerzero_oft", "robinhood", "solana", "USDG", "USDG")
+            if to_chain == "solana":
+                if to_token == "USDC":
+                    add_swap("solana", "USDG", "USDC")
+                elif to_token == "SOL":
+                    add_swap("solana", "USDG", "USDC")
+                    add_swap("solana", "USDC", "SOL")
+            else:
+                add_swap("solana", "USDG", "USDC")
+                add_bridge("circle_cctp", "solana", to_chain, "USDC", "USDC")
+                if to_token == "ETH":
+                    add_swap(to_chain, "USDC", "ETH")
+            return "robinhood_paxos_egress_composition", False, path
+        if to_chain == "robinhood":
+            if from_chain == "solana":
+                if from_token == "SOL":
+                    add_swap("solana", "SOL", "USDC")
+                elif from_token == "USDG":
+                    add_swap("solana", "USDG", "USDC")
+                add_bridge("circle_cctp", "solana", "base", "USDC", "USDC")
+                across_source = "base"
+            else:
+                if from_token == "ETH":
+                    add_swap(from_chain, "ETH", "USDC")
+                across_source = from_chain
+            add_bridge("across_intent_bridge", across_source, "robinhood", "USDC", "USDG")
+            if to_token == "ETH":
+                add_swap("robinhood", "USDG", "ETH")
+            return "robinhood_across_ingress_composition", True, path
+        if from_token != "USDC":
+            add_swap(from_chain, from_token, "USDC")
+        add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
+        if to_token != "USDC":
+            add_swap(to_chain, "USDC", to_token)
+        return "cctp_direct_composition", False, path
+
+    @staticmethod
+    def _raw_step_shape(step: dict[str, Any]) -> tuple[str, str, str]:
+        provider = step.get("provider")
+        if provider in _SWAP_PROVIDERS and step.get("kind") == "direct_swap":
+            chain = step.get("chain")
+            return "swap", f"{chain}:{step.get('from')}", f"{chain}:{step.get('to')}"
+        if provider in _BRIDGE_PROVIDERS and step.get("kind") == "direct_bridge":
+            source_asset = step.get("from_asset") if provider == "across_intent_bridge" else step.get("asset")
+            destination_asset = step.get("to_asset") if provider == "across_intent_bridge" else step.get("asset")
+            return "bridge", f"{step.get('from')}:{source_asset}", f"{step.get('to')}:{destination_asset}"
+        _fail("assetfare_direct_route_summary_invalid")
+
+    @classmethod
+    def _validate_direct_route_summary(
+        cls,
+        value: Any,
+        *,
+        expected_from: str,
+        expected_to: str,
+        intent: dict[str, Any],
+        offer: dict[str, Any],
+        route: dict[str, Any],
+        risk: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate the agent-readable route proof and bind it to the raw quote."""
+        if not isinstance(value, dict) or set(value) != _DIRECT_SUMMARY_KEYS:
+            _fail("assetfare_direct_route_summary_invalid")
+        expected_route = f"{expected_from}->{expected_to}"
+        expected_mode, expected_external, expected_path = cls._expected_direct_route(expected_from, expected_to)
+        if (
+            value.get("version") != _DIRECT_SUMMARY_VERSION
+            or value.get("route") != expected_route
+            or value.get("from") != expected_from
+            or value.get("to") != expected_to
+            or value.get("mode") not in _DIRECT_SUMMARY_MODES
+            or value.get("mode") != expected_mode
+            or value.get("route_aggregator_used") is not False
+            or value.get("assetfare_fee_bps") != 1
+            or value.get("server_signing") is not False
+            or value.get("server_submission") is not False
+        ):
+            _fail("assetfare_direct_route_summary_invalid")
+        summary_steps = value.get("steps")
+        step_count = value.get("step_count")
+        fee_index = value.get("fee_collection_step_index")
+        raw_steps = route.get("steps")
+        if (
+            not _int(step_count)
+            or not 1 <= step_count <= 8
+            or not isinstance(summary_steps, list)
+            or len(summary_steps) != step_count
+            or step_count != len(expected_path)
+            or not isinstance(raw_steps, list)
+            or len(raw_steps) != step_count
+            or not _int(fee_index)
+            or not 0 <= fee_index < step_count
+            or offer.get("fee_collection_steps") != [fee_index]
+        ):
+            _fail("assetfare_direct_route_summary_invalid")
+
+        previous_expected_output = None
+        previous_minimum_output = None
+        any_external = False
+        fee_total = 0
+        for index, (step, raw_step) in enumerate(zip(summary_steps, raw_steps, strict=True)):
+            if not isinstance(step, dict) or set(step) != _DIRECT_SUMMARY_STEP_KEYS:
+                _fail("assetfare_direct_route_summary_invalid")
+            if step.get("index") != index or step.get("provider") not in _DIRECT_SUMMARY_PROVIDERS:
+                _fail("assetfare_direct_route_summary_invalid")
+            provider = step["provider"]
+            external = provider == "across_intent_bridge"
+            action = "swap" if provider in _SWAP_PROVIDERS else "bridge"
+            expected_provider, expected_step_from, expected_step_to = expected_path[index]
+            if (
+                provider != expected_provider
+                or step.get("action") != action
+                or step.get("from") != expected_step_from
+                or step.get("to") != expected_step_to
+                or step.get("direct_protocol") is not (not external)
+                or step.get("external_intent_protocol") is not external
+                or step.get("aggregator_api_used") is not False
+                or step.get("from") not in {f"{chain}:{token}" for chain, token in _ENDPOINTS}
+                or step.get("to") not in {
+                    f"{chain}:{token}" for chain, token in _ENDPOINTS if chain not in _SOURCE_ONLY_CHAINS
+                }
+            ):
+                _fail("assetfare_direct_route_summary_invalid")
+            expected_input = cls._summary_amount(step.get("expected_input_base"))
+            minimum_input = cls._summary_amount(step.get("minimum_input_base"))
+            expected_output = cls._summary_amount(step.get("expected_output_base"))
+            minimum_output = cls._summary_amount(step.get("minimum_output_base"))
+            if int(minimum_input) > int(expected_input) or int(minimum_output) > int(expected_output):
+                _fail("assetfare_direct_route_summary_invalid")
+            if index == 0:
+                if (
+                    step.get("from") != expected_from
+                    or expected_input != str(intent.get("estimated_input_base"))
+                    or minimum_input != expected_input
+                ):
+                    _fail("assetfare_direct_route_summary_invalid")
+            elif (
+                step.get("from") != summary_steps[index - 1].get("to")
+                or expected_input != previous_expected_output
+                or minimum_input != previous_minimum_output
+            ):
+                _fail("assetfare_direct_route_summary_invalid")
+            if index == step_count - 1 and step.get("to") != expected_to:
+                _fail("assetfare_direct_route_summary_invalid")
+
+            raw_action, raw_from, raw_to = cls._raw_step_shape(raw_step)
+            raw_expected_input = raw_step.get("expected_input_base")
+            raw_minimum_input = raw_step.get("floor_input_base")
+            raw_expected_output = raw_step.get("expected_output_base")
+            raw_minimum_output = raw_step.get("minimum_output_base")
+            if (
+                raw_step.get("index") != index
+                or raw_step.get("provider") != provider
+                or raw_action != action
+                or raw_from != step.get("from")
+                or raw_to != step.get("to")
+                or raw_step.get("route_fee_bps") != step.get("assetfare_fee_bps")
+                or any(not _int(raw) or raw < 1 for raw in (raw_expected_input, raw_minimum_input, raw_expected_output, raw_minimum_output))
+                or expected_input != str(raw_expected_input)
+                or minimum_input != str(raw_minimum_input)
+                or expected_output != str(raw_expected_output)
+                or minimum_output != str(raw_minimum_output)
+            ):
+                _fail("assetfare_direct_route_summary_invalid")
+            step_fee = step.get("assetfare_fee_bps")
+            if not _int(step_fee) or step_fee not in (0, 1) or (step_fee == 1) is not (index == fee_index):
+                _fail("assetfare_direct_route_summary_invalid")
+            fee_total += step_fee
+            any_external = any_external or external
+            previous_expected_output = expected_output
+            previous_minimum_output = minimum_output
+
+        if (
+            fee_total != 1
+            or any_external is not expected_external
+            or value.get("classification") != ("external_intent" if any_external else "direct_protocol_only")
+            or value.get("external_intent_protocol_used") is not any_external
+            or value.get("provider_internal_dex_aggregation_possible") is not any_external
+            or route.get("mode") != value.get("mode")
+            or route.get("input_base") != intent.get("estimated_input_base")
+            or str(route.get("expected_output_base")) != previous_expected_output
+            or str(route.get("minimum_output_base")) != previous_minimum_output
+            or route.get("aggregator_api_used") is not False
+            or route.get("external_intent_protocol_used") is not any_external
+            or risk.get("external_intent_protocol_used") is not any_external
+            or risk.get("provider_internal_dex_aggregation_possible") is not any_external
+        ):
+            _fail("assetfare_direct_route_summary_invalid")
+        return dict(value)
 
     # ---- read-only capabilities ----
     def get_capabilities(self) -> dict[str, Any]:
@@ -562,6 +858,15 @@ class AssetFareClient:
         if risk.get("fresh_quote_required_each_step") is not True:
             _fail("assetfare_response_invalid")
         self._no_sign(risk)
+        direct_route_summary = self._validate_direct_route_summary(
+            data.get("direct_route_summary"),
+            expected_from=expected_from,
+            expected_to=expected_to,
+            intent=intent,
+            offer=offer,
+            route=route,
+            risk=risk,
+        )
 
         # Every supported route is execution-ready through caller-operated wallets.
         if not isinstance(execution.get("first_unsigned_action_supported"), bool):
@@ -598,6 +903,7 @@ class AssetFareClient:
             "estimated_time_seconds": eta if _int(eta) else None,
             "cost_summary": cost,
             "eta": eta_summary or {"estimated_time_seconds":eta if _int(eta) else None,"estimated_time_range_seconds":None,"complete_route_estimate":False,"sources":[],"note":"Legacy-core fallback; full ETA provenance unavailable"},
+            "direct_route_summary": direct_route_summary,
             "non_atomic": risk["non_atomic"],
             "quote_id": data["quote_id"],
             "as_of": as_of,

@@ -193,8 +193,102 @@ def executable_handoff_v2():
     }
 
 
+def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
+    if source_only:
+        mode = f"{fc}_source_cctp"
+        raw_steps = [{
+            "index": 0, "kind": "direct_bridge", "provider": "circle_cctp",
+            "from": fc, "to": tc, "asset": "USDC", "route_fee_bps": 1,
+            "expected_input_base": 1, "floor_input_base": 1,
+            "expected_output_base": 1, "minimum_output_base": 1,
+        }]
+    elif tc == "robinhood" and fc != "robinhood":
+        mode = "robinhood_across_ingress_composition"
+        raw_steps = [{
+            "index": 0, "kind": "direct_bridge", "provider": "across_intent_bridge",
+            "from": fc, "to": tc, "from_asset": ft, "to_asset": tt, "route_fee_bps": 1,
+            "expected_input_base": 1, "floor_input_base": 1,
+            "expected_output_base": 1, "minimum_output_base": 1,
+        }]
+    else:
+        mode = "cctp_direct_composition"
+        raw_steps = [
+            {
+                "index": 0, "kind": "direct_swap", "provider": "raydium_clmm",
+                "chain": fc, "from": ft, "to": "USDC", "route_fee_bps": 1,
+                "expected_input_base": 1, "floor_input_base": 1,
+                "expected_output_base": 2, "minimum_output_base": 1,
+            },
+            {
+                "index": 1, "kind": "direct_bridge", "provider": "circle_cctp",
+                "from": fc, "to": tc, "asset": "USDC", "route_fee_bps": 0,
+                "expected_input_base": 2, "floor_input_base": 1,
+                "expected_output_base": 3, "minimum_output_base": 1,
+            },
+            {
+                "index": 2, "kind": "direct_swap", "provider": "uniswap_v3",
+                "chain": tc, "from": "USDC", "to": tt, "route_fee_bps": 0,
+                "expected_input_base": 3, "floor_input_base": 1,
+                "expected_output_base": 4, "minimum_output_base": 1,
+            },
+        ]
+    summary_steps = []
+    for row in raw_steps:
+        bridge = row["kind"] == "direct_bridge"
+        external = row["provider"] == "across_intent_bridge"
+        source_asset = row.get("from_asset") if external else row.get("asset")
+        destination_asset = row.get("to_asset") if external else row.get("asset")
+        summary_steps.append({
+            "index": row["index"],
+            "action": "bridge" if bridge else "swap",
+            "provider": row["provider"],
+            "from": f"{row['from']}:{source_asset}" if bridge else f"{row['chain']}:{row['from']}",
+            "to": f"{row['to']}:{destination_asset}" if bridge else f"{row['chain']}:{row['to']}",
+            "expected_input_base": str(row["expected_input_base"]),
+            "minimum_input_base": str(row["floor_input_base"]),
+            "expected_output_base": str(row["expected_output_base"]),
+            "minimum_output_base": str(row["minimum_output_base"]),
+            "assetfare_fee_bps": row["route_fee_bps"],
+            "direct_protocol": not external,
+            "external_intent_protocol": external,
+            "aggregator_api_used": False,
+        })
+    route_name = f"{fc}:{ft}->{tc}:{tt}"
+    summary = {
+        "version": "assetfare-direct-route-summary-v1",
+        "route": route_name,
+        "from": f"{fc}:{ft}",
+        "to": f"{tc}:{tt}",
+        "classification": "external_intent" if tc == "robinhood" and fc != "robinhood" else "direct_protocol_only",
+        "mode": mode,
+        "route_aggregator_used": False,
+        "external_intent_protocol_used": tc == "robinhood" and fc != "robinhood",
+        "provider_internal_dex_aggregation_possible": tc == "robinhood" and fc != "robinhood",
+        "assetfare_fee_bps": 1,
+        "fee_collection_step_index": 0,
+        "server_signing": False,
+        "server_submission": False,
+        "step_count": len(summary_steps),
+        "steps": summary_steps,
+    }
+    route = {
+        "route": route_name,
+        "mode": mode,
+        "input_base": 1,
+        "expected_output_base": raw_steps[-1]["expected_output_base"],
+        "minimum_output_base": raw_steps[-1]["minimum_output_base"],
+        "steps": raw_steps,
+        "quote_latency_ms": 120,
+        "aggregator_api_used": False,
+        "external_intent_protocol_used": summary["external_intent_protocol_used"],
+        "server_signing": False,
+        "server_submission": False,
+    }
+    return route, summary
+
+
 def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
-    steps = [{"kind": "burn"}]
+    route, direct_route_summary = direct_route_fixture(fc, ft, tc, tt, source_only=source_only)
     offer_fee = fee
     collectible = fee == 1
     fee_steps = [0] if fee == 1 else []
@@ -225,19 +319,18 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
             "fee_collection": "only_on_eligible_successful_executor_step",
             "estimated_time_seconds": 23,
         },
-        "route": {
-            "route": f"{fc}:{ft}->{tc}:{tt}",
-            "steps": steps,
-            "quote_latency_ms": 120,
-            "server_signing": False,
-            "server_submission": False,
-        },
+        "route": route,
         "risk": {
             "non_atomic": True,
             "fresh_quote_required_each_step": True,
+            "external_intent_protocol_used": direct_route_summary["external_intent_protocol_used"],
+            "provider_internal_dex_aggregation_possible": direct_route_summary[
+                "provider_internal_dex_aggregation_possible"
+            ],
             "server_signing": False,
             "server_submission": False,
         },
+        "direct_route_summary": direct_route_summary,
         "execution": execution,
         "caller_action_plan_handoff": handoff,
         "caller_action_plan_handoff_v2": executable_handoff_v2(),
@@ -542,6 +635,100 @@ def test_quote_exact_body_and_bounded_return():
     assert out["source_only"] is False
     assert out["evaluation_guidance"] == EVALUATION_GUIDANCE
     assert out["server_signs_or_submits"] is False
+    summary = out["direct_route_summary"]
+    assert summary["version"] == "assetfare-direct-route-summary-v1"
+    assert summary["classification"] == "direct_protocol_only"
+    assert summary["route_aggregator_used"] is False
+    assert summary["fee_collection_step_index"] == 0
+    assert [step["provider"] for step in summary["steps"]] == [
+        "raydium_clmm", "circle_cctp", "uniswap_v3"
+    ]
+
+
+def test_across_quote_exposes_honest_external_intent_caveat():
+    q = with_cost_summary(valid_quote("base", "USDC", "robinhood", "USDG", 250))
+    out = client({"/v2/quote": q}).get_quote("base", "USDC", "robinhood", "USDG", 250)
+    summary = out["direct_route_summary"]
+    assert summary["classification"] == "external_intent"
+    assert summary["route_aggregator_used"] is False
+    assert summary["external_intent_protocol_used"] is True
+    assert summary["provider_internal_dex_aggregation_possible"] is True
+    assert summary["steps"][0]["provider"] == "across_intent_bridge"
+    assert summary["steps"][0]["direct_protocol"] is False
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q.pop("direct_route_summary"),
+        lambda q: q["direct_route_summary"].update(extra="forbidden"),
+        lambda q: q["direct_route_summary"]["steps"][0].update(expected_input_base=1),
+        lambda q: q["direct_route_summary"]["steps"][0].update(expected_input_base="01"),
+        lambda q: q["direct_route_summary"]["steps"][1].update(expected_input_base="3"),
+        lambda q: q["direct_route_summary"]["steps"][1].update(minimum_input_base="2"),
+        lambda q: q["direct_route_summary"]["steps"][0].update(private_key="forbidden"),
+        lambda q: q["direct_route_summary"].update(fee_collection_step_index=1),
+        lambda q: q["direct_route_summary"]["steps"][0].update(assetfare_fee_bps=0),
+        lambda q: q["direct_route_summary"].update(route_aggregator_used=True),
+        lambda q: q["direct_route_summary"].update(server_signing=True),
+        lambda q: q["route"].update(mode="same_chain_direct"),
+        lambda q: q["risk"].update(provider_internal_dex_aggregation_possible=True),
+    ],
+)
+def test_direct_route_summary_hostiles_fail_closed(mut):
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
+    mut(q)
+    with pytest.raises(AssetFareError):
+        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+
+
+def test_robinhood_ingress_cannot_be_collusively_relabelled_direct():
+    q = with_cost_summary(valid_quote("base", "USDC", "robinhood", "USDG", 250))
+    raw = q["route"]["steps"][0]
+    raw.update(provider="circle_cctp", asset="USDC")
+    raw.pop("from_asset")
+    raw.pop("to_asset")
+    q["route"]["external_intent_protocol_used"] = False
+    q["risk"]["external_intent_protocol_used"] = False
+    q["risk"]["provider_internal_dex_aggregation_possible"] = False
+    summary = q["direct_route_summary"]
+    summary.update(
+        classification="direct_protocol_only",
+        external_intent_protocol_used=False,
+        provider_internal_dex_aggregation_possible=False,
+    )
+    summary["steps"][0].update(
+        provider="circle_cctp",
+        to="robinhood:USDC",
+        direct_protocol=True,
+        external_intent_protocol=False,
+    )
+    with pytest.raises(AssetFareError, match="assetfare_direct_route_summary_invalid"):
+        client({"/v2/quote": q}).get_quote("base", "USDC", "robinhood", "USDG", 250)
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q["route"]["steps"][0].update(private_key="forbidden"),
+        lambda q: q["route"]["steps"][0].update(signed=True),
+        lambda q: q["route"]["steps"][0].update(submitted=True),
+    ],
+)
+def test_raw_route_secret_or_signed_claim_fails_closed(mut):
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
+    mut(q)
+    with pytest.raises(AssetFareError, match="assetfare_safety_boundary_failed"):
+        client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+
+
+def test_raw_provider_evidence_is_not_projected_into_normalized_summary():
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 250))
+    q["route"]["steps"][0]["expected_evidence"] = {"provider_raw": "opaque", "signed": False}
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 250)
+    encoded = json.dumps(out["direct_route_summary"], sort_keys=True)
+    assert "expected_evidence" not in encoded
+    assert "provider_raw" not in encoded
 
 
 @pytest.mark.parametrize("mut",[

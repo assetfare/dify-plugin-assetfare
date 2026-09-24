@@ -5,8 +5,16 @@ identity:
     en_US: AssetFare
     zh_Hans: AssetFare
   description:
-    en_US: Strictly read-only non-custodial cross-chain capabilities and fee-inclusive quotes across six source chains and 76 routes. No wallet, authentication, preparation, session, signing, submission, funding, swap, or bridge-execution tool.
-    zh_Hans: 严格只读的非托管跨链能力与含费报价，覆盖六个源链和 76 条路由。不提供钱包、认证、准备、会话、签名、提交、资金、交换或跨链执行工具。
+    en_US: >-
+      Strictly read-only non-custodial cross-chain capabilities and fee-inclusive quotes across six source
+      chains and 76 routes. Quotes expose a validated ordered direct-route summary: exact protocols,
+      endpoints, base-unit amounts, the one 1bp fee step, and explicit direct_protocol_only versus Across
+      external_intent classification. No wallet, authentication, preparation, session, signing, submission,
+      funding, swap, or bridge-execution tool.
+    zh_Hans: >-
+      严格只读的非托管跨链能力与含费报价，覆盖六个源链和 76 条路由。报价公开经过验证且按顺序排列的直接路由摘要：精确的协议、端点、基础单位金额、唯一的
+      1bp 收费步骤，以及 direct_protocol_only 与 Across external_intent
+      的明确分类。不提供钱包、认证、准备、会话、签名、提交、资金、交换或跨链执行工具。
   icon: icon.svg
 credentials_for_provider: {}
 tools:
