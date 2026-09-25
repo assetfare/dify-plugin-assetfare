@@ -46,7 +46,7 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
 
 def test_manifest_separates_product_and_format_versions_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "1.0.0"
+    assert manifest["version"] == "1.0.1"
     # This is Dify's manifest-format version, not the AssetFare product version.
     assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
@@ -110,3 +110,15 @@ def test_tool_schemas_preserve_one_dollar_boundary_and_surface_guidance():
         assert "1" in description
         assert "50" in description
         assert "1,000" in description
+
+
+def test_readme_gives_one_safe_dify_first_call_and_follow_up_path():
+    readme = (ROOT / "README.md").read_text()
+    flat = " ".join(readme.split())
+    assert "## First quote in Dify" in readme
+    assert "Call assetfare_capabilities first" in readme
+    assert "request one AssetFare quote for USD 1,000" in readme
+    assert "Do not prepare, authenticate, request a wallet, sign, submit, or move funds" in readme
+    assert "assetfare-pilot.yml" in readme
+    assert "Never post a wallet address, balance, credential, key, signature" in flat
+    assert "This\nRead direct_route_summary" not in readme

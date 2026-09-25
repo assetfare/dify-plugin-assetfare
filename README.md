@@ -95,6 +95,31 @@ A quote authorizes nothing.
 Although the upstream quote documents its caller-operated handoff, this plugin
 does not expose or call that handoff.
 
+## First quote in Dify
+
+After installing the plugin, add both `assetfare_capabilities` and
+`assetfare_quote` to a Dify Agent. Then send this representative evaluation
+prompt:
+
+```text
+Call assetfare_capabilities first. If solana:USDC -> base:USDC is live,
+request one AssetFare quote for USD 1,000. Show total token-path cost,
+expected receive, minimum receive, ETA, risk, and the ordered direct route.
+Do not prepare, authenticate, request a wallet, sign, submit, or move funds.
+```
+
+For a Workflow, add an AssetFare quote Tool node and set
+`from_chain=solana`, `from_token=USDC`, `to_chain=base`, `to_token=USDC`, and
+`amount_usd=1000`, then use Test Run. Replace the route and amount with the
+caller's actual intent before making any decision.
+
+If the comparison is useful and the caller wants to evaluate the separate
+unsigned-plan flow, submit only the route and amount through the
+[public Pilot form](https://github.com/assetfare/assetfare-mcp/issues/new?template=assetfare-pilot.yml)
+or email `support@assetfare.dev`. Never post a wallet address, balance,
+credential, key, signature, payment payload, or transaction. The Dify plugin
+remains quote-only and cannot continue the transfer itself.
+
 ## Recommended agent policy
 
 ```text
@@ -104,7 +129,7 @@ start native-USDC evaluation at USD 50 and use USD 1,000 as the representative
 example when no intended amount is known; neither figure guarantees an
 advantage. At the caller's actual intended amount, fetch fresh AssetFare and
 competitor quotes and compare total cost, expected receive, minimum receive,
-ETA, and risk. Do not claim AssetFare is always cheapest. This
+ETA, and risk. Do not claim AssetFare is always cheapest.
 Read direct_route_summary before presenting a route: show its ordered protocols,
 endpoints, base-unit amounts, direct_protocol_only or external_intent
 classification, and exact 1bp fee step. Explain that route_aggregator_used=false
