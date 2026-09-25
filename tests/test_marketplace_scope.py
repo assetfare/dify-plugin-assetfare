@@ -44,9 +44,10 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
     assert '"estimated_usd":amount/10_000' in source
 
 
-def test_manifest_is_read_only_0011_and_surfaces_route_transparency():
+def test_manifest_separates_product_and_format_versions_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "0.0.11"
+    assert manifest["version"] == "1.0.0"
+    # This is Dify's manifest-format version, not the AssetFare product version.
     assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
     assert "strictly read-only" in description

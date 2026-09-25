@@ -1,6 +1,6 @@
-# Dify Marketplace scope — AssetFare 0.0.9
+# Dify Marketplace scope — AssetFare 1.0.0
 
-AssetFare 0.0.9 is intentionally limited to two strictly read-only evaluation
+AssetFare 1.0.0 is intentionally limited to two strictly read-only evaluation
 tools: capabilities and quote.
 
 It calls one fixed, documented HTTPS origin and contains no wallet,
