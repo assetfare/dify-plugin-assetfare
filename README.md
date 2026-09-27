@@ -13,9 +13,10 @@ a route always happens outside this plugin under the caller's control.
 
 ## Public scope
 
-- Six source chains: Solana, Base, Arbitrum, Robinhood Chain, Polygon, Optimism.
-- Eleven source `(chain, token)` endpoints and 76 directed routes.
-- Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum.
+- Eight source chains and thirteen source `(chain, token)` endpoints spanning
+  80 directed routes.
+- Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum;
+  Ethereum and HyperEVM are native-USDC source-only origins to Base or Solana.
 - Finite USD amount of at least 1; no business maximum. USD 1 is the
   technical minimum and is only useful as a reachability/response-shape smoke
   test, never as an economic comparison.
@@ -32,7 +33,7 @@ a route always happens outside this plugin under the caller's control.
   allowed/recommended mode, and the full runtime OpenAPI URL. It never creates
   `approval_v3`, selects a mode, collects wallet data, or calls prepare/session.
   `caller_approved: true` alone is not proof of human approval; legacy handoff
-  metadata is advisory. Payload hashes use the REST 2.4 portable projection:
+  metadata is advisory. Payload hashes use the REST 2.5 portable projection:
   exact base-unit strings from `direct_route_summary` replace duplicated raw
   numbers before typed-canonical-v1 preserves JSON types and encodes finite
   numbers as IEEE-754 binary64; unsafe integral numbers and lone Unicode
@@ -48,23 +49,21 @@ non-positive base-unit amounts; more or fewer than one 1bp fee step; and any
 claim of server signing, server submission, or market-wide route aggregation.
 
 `classification=direct_protocol_only` means every step uses one of the named
-direct protocols. `classification=external_intent` is used only when the path
-contains `across_intent_bridge`. In both cases,
-`route_aggregator_used=false` means **AssetFare did not call a market-wide route
-aggregator API**. It does not claim that a provider has no internal routing:
-Across may internally source or aggregate destination liquidity, which is why
-those paths explicitly set
-`provider_internal_dex_aggregation_possible=true`. This distinction is part of
-the validated response rather than an inference an agent must make.
+direct protocols. All 80 current routes use that classification;
+`external_intent` remains only a compatibility enum with zero current routes.
+`route_aggregator_used=false` means AssetFare did not call a market-wide route
+aggregator API and does not claim that every provider avoids internal routing.
 
 ## Economic evaluation guidance
 
-- Start native-USDC economic evaluation at USD 50 or more. USD 50 is only the
-  lowest bucket where AssetFare was observed winning; it is not a guarantee for
-  a route, time, or provider state.
-- Use USD 1,000 as the primary representative example when no intended amount
-  has been supplied. It is an example, not a default transaction or a promise of
-  savings.
+- Every quote must contain `economic_guidance.advisory_start_usd` for that exact
+  route. It is dated, non-enforcing, and never a market ranking or execution
+  minimum. There is no global native-USDC starting amount.
+- The complete canonical catalog is
+  <https://assetfare.dev/route-economics.json>. Some rows are measured and the
+  rest are explicitly structural estimates or retest starts.
+- USD 1,000 remains a documentation example only when no intended amount is
+  supplied; it is not route guidance or a promise of savings.
 - Before making any economic or routing decision, request fresh AssetFare and
   competitor quotes at the caller's actual intended amount and compare total
   cost, expected/minimum receive, ETA, and risk. Never claim AssetFare is always
@@ -90,7 +89,8 @@ Request one fresh route quote using:
 
 The tool validates the response fail-closed and returns the ordered direct-route
 summary, total cost, provider fee components, expected receive, conservative
-minimum receive, ETA, expiry, non-atomic risk, and the exact 1bp AssetFare fee.
+minimum receive, ETA, expiry, non-atomic risk, the exact 1bp AssetFare fee, and
+the route-specific economic guidance with its evidence confidence.
 A quote authorizes nothing.
 Although the upstream quote documents its caller-operated handoff, this plugin
 does not expose or call that handoff.
@@ -125,16 +125,17 @@ remains quote-only and cannot continue the transfer itself.
 ```text
 Call assetfare_capabilities, then assetfare_quote for the requested route.
 Treat USD 1 only as a reachability/response-shape smoke test. For economics,
-start native-USDC evaluation at USD 50 and use USD 1,000 as the representative
-example when no intended amount is known; neither figure guarantees an
-advantage. At the caller's actual intended amount, fetch fresh AssetFare and
+read the returned route-specific economic_guidance and the canonical
+route-economics.json catalog. No global native-USDC starting amount exists.
+Use USD 1,000 only as a documentation example when no intended amount is known.
+At the caller's actual intended amount, fetch fresh AssetFare and
 competitor quotes and compare total cost, expected receive, minimum receive,
 ETA, and risk. Do not claim AssetFare is always cheapest.
 Read direct_route_summary before presenting a route: show its ordered protocols,
 endpoints, base-unit amounts, direct_protocol_only or external_intent
 classification, and exact 1bp fee step. Explain that route_aggregator_used=false
-describes AssetFare's own API use, while Across may internally source or
-aggregate destination liquidity. This plugin is evaluation-only: it has no
+describes AssetFare's own API use and that all current routes are direct_protocol_only.
+This plugin is evaluation-only: it has no
 wallet or execution tool and must never
 sign, submit, fund, swap, bridge, authenticate, or create a session.
 ```

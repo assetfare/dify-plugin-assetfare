@@ -42,22 +42,48 @@ EVM = "0x" + "a" * 40
 SOL = "So11111111111111111111111111111111111111112"
 
 EVALUATION_GUIDANCE = {
-    "schema_version": 1,
+    "schema_version": 2,
     "route_minimum_usd": 1,
     "reachability_smoke_usd": 1,
     "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
-    "native_usdc_economic_evaluation_start_usd": 50,
-    "representative_economic_evaluation_usd": 1000,
-    "sol_input_representative_evaluation_usd": 1000,
+    "route_specific_guidance": {
+        "version": "assetfare-route-economic-guidance-v1",
+        "url": "https://assetfare.dev/route-economics.json",
+        "required_on_every_quote": True,
+        "controls_evaluation_start": True,
+        "values_change_with_market": True,
+    },
+    "documentation_example_usd": 1000,
+    "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
     "sol_input_caveat": (
         "SOL-input routes add a source swap, so compare their full fee-inclusive route economics separately."
     ),
-    "evidence_as_of": "2026-09-23",
-    "evidence_scope": "Dated Solana native USDC to Base native USDC measurements at USD 50, 250, and 1000.",
+    "historical_observation": {
+        "route": "solana:USDC->base:USDC",
+        "observed_competitive_bucket_usd": 50,
+        "evidence_as_of": "2026-09-23",
+        "not_generalizable": True,
+    },
     "not_a_minimum": True,
     "not_guaranteed_best": True,
     "always_compare_fresh_at_intended_amount": True,
 }
+
+ECONOMIC_GUIDANCE = {
+    "version": "assetfare-route-economic-guidance-v1",
+    "as_of": "2026-09-27",
+    "route_count": 80,
+    "currency": "USD",
+    "technical_quote_minimum_usd": 1,
+    "economic_guidance_is_non_enforcing": True,
+    "amount_is_never_rejected_by_economic_guidance": True,
+    "values_change_with_market": True,
+    "fresh_quote_and_caller_decision_control": True,
+    "update_policy": "append_daily_observations_then_replace_values_without_schema_change",
+    "confidence_counts": {"measured_two_day":4,"measured_route_specific":11,"structural_estimate":37,"reworked_route_remeasure":14,"coverage_only_retest":14},
+    "advisory_start_distribution": {"50":1,"100":6,"250":13,"500":12,"1000":19,"2500":4,"5000":18,"10000":7},
+}
+ROUTE_ECONOMIC_GUIDANCE = {"advisory_start_usd":1000,"advisory_role":"structural_evaluation_start_not_observed_eligibility","status":"provisional_evaluation_start","confidence":"structural_estimate","basis":"offline_fixture_only","tested_amounts_usd":[],"not_an_execution_minimum":True,"not_a_best_price_guarantee":True,"fresh_quote_required":True}
 
 
 def af(**kwargs):
@@ -77,22 +103,26 @@ ENDPOINTS = [
     ("robinhood", "USDG"),
     ("polygon", "USDC"),
     ("optimism", "USDC"),
+    ("ethereum", "USDC"),
+    ("hyperevm", "USDC"),
 ]
 
-# Chains that may only be a source (native USDC -> base/arbitrum USDC), never a
-# destination: polygon and optimism (both audited 1bp source executors).
-SOURCE_ONLY_CHAINS = {"polygon", "optimism"}
+# Chains that may only be a source, never a destination. Polygon/Optimism go
+# to Base/Arbitrum USDC; Ethereum/HyperEVM go to Base/Solana USDC.
+SOURCE_ONLY_CHAINS = {"ethereum", "hyperevm", "polygon", "optimism"}
 DESTINATION_ENDPOINTS = [(c, t) for (c, t) in ENDPOINTS if c not in SOURCE_ONLY_CHAINS]
 
 
 def all_routes():
-    """Generate all 76 execution-ready directed routes."""
+    """Generate all 80 execution-ready directed routes."""
     routes = []
     for fc, ft in ENDPOINTS:
         for tc, tt in DESTINATION_ENDPOINTS:
             if (fc, ft) == (tc, tt):
                 continue
-            if fc in SOURCE_ONLY_CHAINS and not (ft == "USDC" and tc in {"base", "arbitrum"} and tt == "USDC"):
+            if fc in {"polygon", "optimism"} and not (ft == "USDC" and tc in {"base", "arbitrum"} and tt == "USDC"):
+                continue
+            if fc in {"ethereum", "hyperevm"} and not (ft == "USDC" and tc in {"base", "solana"} and tt == "USDC"):
                 continue
             routes.append((fc, ft, tc, tt))
     return routes
@@ -102,32 +132,40 @@ def valid_caps():
     return {
         "status": "capped_public_agent_release",
         "public_api_enabled": True,
-        "directed_conversion_routes": 76,
-        "unsigned_route_plans_ready": 76,
-        "execution_ready_routes": 76,
-        "execution_implemented_routes": 76,
-        "currently_prepare_ready_routes": 76,
+        "directed_conversion_routes": 80,
+        "unsigned_route_plans_ready": 80,
+        "execution_ready_routes": 80,
+        "execution_implemented_routes": 80,
+        "currently_prepare_ready_routes": 80,
         "temporarily_unavailable_routes": [],
         "temporarily_unavailable_route_count": 0,
         "execution_availability": {"status":"available","provider":"circle_iris","provider_dependent_routes":50,"recent_fee_snapshot_usable":True,"guarantees_future_availability":False},
         "phase_b_blocked_routes": 0,
         "server_signing": False,
         "server_submission": False,
-        "chains": ["arbitrum", "base", "optimism", "polygon", "robinhood", "solana"],
+        "chains": ["arbitrum", "base", "ethereum", "hyperevm", "optimism", "polygon", "robinhood", "solana"],
         "asset_endpoints": [{"chain": c, "token": t} for c, t in ENDPOINTS],
         "source_only_asset_endpoints": [
             {"chain": "polygon", "token": "USDC"},
             {"chain": "optimism", "token": "USDC"},
+            {"chain": "ethereum", "token": "USDC"},
+            {"chain": "hyperevm", "token": "USDC"},
         ],
         "source_only_routes": [
             "polygon:USDC->base:USDC",
             "polygon:USDC->arbitrum:USDC",
             "optimism:USDC->base:USDC",
             "optimism:USDC->arbitrum:USDC",
+            "ethereum:USDC->base:USDC",
+            "ethereum:USDC->solana:USDC",
+            "hyperevm:USDC->base:USDC",
+            "hyperevm:USDC->solana:USDC",
         ],
         "blocked_source_only_routes": [],
         "amount_usd": {"minimum": 1, "maximum": None, "policy": "no_business_maximum"},
         "evaluation_guidance": dict(EVALUATION_GUIDANCE),
+        "economic_guidance": copy.deepcopy(ECONOMIC_GUIDANCE),
+        "route_product_policy": {"amount_conditioned_routes": {}, "economic_guidance": copy.deepcopy(ECONOMIC_GUIDANCE), "economic_guidance_url": "https://assetfare.dev/route-economics.json"},
     }
 
 
@@ -208,21 +246,28 @@ def executable_handoff_v2():
 
 def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
     if source_only:
-        mode = f"{fc}_source_cctp"
+        mode = f"{fc}_source_cctp" if fc in {"optimism", "polygon"} else "cctp_direct_composition"
         raw_steps = [{
             "index": 0, "kind": "direct_bridge", "provider": "circle_cctp",
             "from": fc, "to": tc, "asset": "USDC", "route_fee_bps": 1,
             "expected_input_base": 1, "floor_input_base": 1,
             "expected_output_base": 1, "minimum_output_base": 1,
         }]
+        if fc in {"optimism", "polygon"}:
+            raw_steps.append({
+                "index": 1, "kind": "direct_receive", "provider": "circle_cctp_receive",
+                "chain": tc, "from": "USDC", "to": "USDC", "source_chain": fc,
+                "cctp_mode": "no_forward", "destination_native_gas_required": True,
+                "route_fee_bps": 0, "expected_input_base": 1, "floor_input_base": 1,
+                "expected_output_base": 1, "minimum_output_base": 1,
+            })
     elif tc == "robinhood" and fc != "robinhood":
-        mode = "robinhood_across_ingress_composition"
-        raw_steps = [{
-            "index": 0, "kind": "direct_bridge", "provider": "across_intent_bridge",
-            "from": fc, "to": tc, "from_asset": ft, "to_asset": tt, "route_fee_bps": 1,
-            "expected_input_base": 1, "floor_input_base": 1,
-            "expected_output_base": 1, "minimum_output_base": 1,
-        }]
+        mode = "robinhood_paxos_ingress_composition"
+        raw_steps = [
+            {"index":0,"kind":"direct_bridge","provider":"circle_cctp","from":fc,"to":"solana","asset":"USDC","route_fee_bps":1,"minimum_guard_bps":17,"expected_input_base":1,"floor_input_base":1,"expected_output_base":2,"minimum_output_base":1},
+            {"index":1,"kind":"direct_swap","provider":"orca_whirlpool","chain":"solana","from":"USDC","to":"USDG","route_fee_bps":0,"minimum_guard_bps":17,"expected_input_base":2,"floor_input_base":1,"expected_output_base":3,"minimum_output_base":1},
+            {"index":2,"kind":"direct_bridge","provider":"paxos_usdg_layerzero_oft","from":"solana","to":"robinhood","asset":"USDG","route_fee_bps":0,"minimum_guard_bps":16,"expected_input_base":3,"floor_input_base":1,"expected_output_base":4,"minimum_output_base":1},
+        ]
     else:
         mode = "cctp_direct_composition"
         raw_steps = [
@@ -248,12 +293,13 @@ def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
     summary_steps = []
     for row in raw_steps:
         bridge = row["kind"] == "direct_bridge"
+        receive = row["kind"] == "direct_receive"
         external = row["provider"] == "across_intent_bridge"
         source_asset = row.get("from_asset") if external else row.get("asset")
         destination_asset = row.get("to_asset") if external else row.get("asset")
         summary_steps.append({
             "index": row["index"],
-            "action": "bridge" if bridge else "swap",
+            "action": "bridge" if bridge else "receive" if receive else "swap",
             "provider": row["provider"],
             "from": f"{row['from']}:{source_asset}" if bridge else f"{row['chain']}:{row['from']}",
             "to": f"{row['to']}:{destination_asset}" if bridge else f"{row['chain']}:{row['to']}",
@@ -265,6 +311,7 @@ def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
             "direct_protocol": not external,
             "external_intent_protocol": external,
             "aggregator_api_used": False,
+            **({"minimum_guard_bps": row["minimum_guard_bps"]} if "minimum_guard_bps" in row else {}),
         })
     route_name = f"{fc}:{ft}->{tc}:{tt}"
     summary = {
@@ -272,13 +319,18 @@ def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
         "route": route_name,
         "from": f"{fc}:{ft}",
         "to": f"{tc}:{tt}",
-        "classification": "external_intent" if tc == "robinhood" and fc != "robinhood" else "direct_protocol_only",
+        "classification": "direct_protocol_only",
         "mode": mode,
+        "product_classification": "primary_direct",
+        "economic_eligibility": "not_asserted_by_capability",
+        "public_execution_eligible": True,
+        "primary_selection_eligible": True,
+        "route_minimum_guard_bps": 50 if mode == "robinhood_paxos_ingress_composition" else None,
         "route_aggregator_used": False,
-        "external_intent_protocol_used": tc == "robinhood" and fc != "robinhood",
-        "provider_internal_dex_aggregation_possible": tc == "robinhood" and fc != "robinhood",
+        "external_intent_protocol_used": False,
+        "provider_internal_dex_aggregation_possible": False,
         "assetfare_fee_bps": 1,
-        "fee_collection_step_index": 0,
+        "fee_collection_step_index": next(index for index, row in enumerate(raw_steps) if row["route_fee_bps"] == 1),
         "server_signing": False,
         "server_submission": False,
         "step_count": len(summary_steps),
@@ -287,6 +339,11 @@ def direct_route_fixture(fc, ft, tc, tt, *, source_only=False):
     route = {
         "route": route_name,
         "mode": mode,
+        "product_classification": "primary_direct",
+        "economic_eligibility": "not_asserted_by_capability",
+        "public_execution_eligible": True,
+        "primary_selection_eligible": True,
+        "route_minimum_guard_bps": 50 if mode == "robinhood_paxos_ingress_composition" else None,
         "input_base": 1,
         "expected_output_base": raw_steps[-1]["expected_output_base"],
         "minimum_output_base": raw_steps[-1]["minimum_output_base"],
@@ -317,6 +374,7 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
         "status": "capped_public_agent_release",
         "as_of": "2026-09-17T00:00:00Z",
         "ttl_seconds": 30,
+        "economic_guidance": dict(ROUTE_ECONOMIC_GUIDANCE),
         "intent": {"from": f"{fc}:{ft}", "to": f"{tc}:{tt}", "amount_usd": amount, "estimated_input_base": 1},
         "offer": {
             "expected_receive_amount": 0.061,
@@ -708,22 +766,26 @@ def test_trust_env_disabled():
     assert s.trust_env is False
 
 
-# ---- capabilities (6-chain surface: 11 endpoints, all 76 executable) ----
+# ---- capabilities (8-chain surface: 13 endpoints, all 80 executable) ----
 def test_capabilities_ok():
     caps = client({"/v2/capabilities": valid_caps(), "/v2/status": valid_status()}).get_capabilities()
-    assert caps["directed_conversion_routes"] == 76
-    assert caps["unsigned_route_plans_ready"] == 76
-    assert caps["execution_ready_routes"] == 76
-    assert caps["currently_prepare_ready_routes"] == 76
+    assert caps["directed_conversion_routes"] == 80
+    assert caps["unsigned_route_plans_ready"] == 80
+    assert caps["execution_ready_routes"] == 80
+    assert caps["currently_prepare_ready_routes"] == 80
     assert caps["phase_b_blocked_routes"] == 0
-    assert len(caps["asset_endpoints"]) == 11
+    assert len(caps["asset_endpoints"]) == 13
     assert caps["server_signs_or_submits"] is False
-    assert sorted(caps["source_only_asset_endpoints"]) == ["optimism:USDC", "polygon:USDC"]
+    assert sorted(caps["source_only_asset_endpoints"]) == ["ethereum:USDC", "hyperevm:USDC", "optimism:USDC", "polygon:USDC"]
     assert set(caps["source_only_routes"]) == {
         "polygon:USDC->base:USDC",
         "polygon:USDC->arbitrum:USDC",
         "optimism:USDC->base:USDC",
         "optimism:USDC->arbitrum:USDC",
+        "ethereum:USDC->base:USDC",
+        "ethereum:USDC->solana:USDC",
+        "hyperevm:USDC->base:USDC",
+        "hyperevm:USDC->solana:USDC",
     }
     assert caps["blocked_source_only_routes"] == []
     assert caps["amount_usd"] == {
@@ -732,12 +794,14 @@ def test_capabilities_ok():
         "policy": "no_business_maximum",
     }
     assert caps["evaluation_guidance"] == EVALUATION_GUIDANCE
+    assert caps["economic_guidance"] == ECONOMIC_GUIDANCE
+    assert caps["economic_guidance_url"] == "https://assetfare.dev/route-economics.json"
 
 
 @pytest.mark.parametrize(
     "mut",
     [
-        lambda c: c.update(directed_conversion_routes=75),
+        lambda c: c.update(directed_conversion_routes=79),
         lambda c: c.update(execution_ready_routes=72),
         lambda c: c.update(phase_b_blocked_routes=4),
         lambda c: c.update(blocked_source_only_routes=["polygon:USDC->base:USDC"]),
@@ -758,7 +822,7 @@ def test_capabilities_partial_live_availability_fails_closed():
 
 
 @pytest.mark.parametrize("mut",[
-    lambda c:c.update(currently_prepare_ready_routes=75,temporarily_unavailable_routes=["evil:USDC->base:USDC"],temporarily_unavailable_route_count=1,execution_availability={"status":"degraded","provider":"circle_iris","guarantees_future_availability":False}),
+        lambda c:c.update(currently_prepare_ready_routes=79,temporarily_unavailable_routes=["evil:USDC->base:USDC"],temporarily_unavailable_route_count=1,execution_availability={"status":"degraded","provider":"circle_iris","guarantees_future_availability":False}),
     lambda c:c.update(execution_availability={"status":"degraded","provider":"circle_iris","guarantees_future_availability":False}),
 ])
 def test_capabilities_live_availability_semantics_fail_closed(mut):
@@ -771,7 +835,7 @@ def test_capabilities_live_availability_semantics_fail_closed(mut):
     [
         lambda c: c.pop("evaluation_guidance"),
         lambda c: c["evaluation_guidance"].update(route_minimum_usd=True),
-        lambda c: c["evaluation_guidance"].update(evidence_as_of="2026-09-24"),
+        lambda c: c["evaluation_guidance"].update(documentation_example_usd=999),
         lambda c: c["evaluation_guidance"].update(extra=True),
     ],
 )
@@ -779,6 +843,23 @@ def test_capabilities_evaluation_guidance_must_match_core_exactly(mut):
     caps = valid_caps()
     mut(caps)
     with pytest.raises(AssetFareError, match="assetfare_evaluation_guidance_invalid"):
+        client({"/v2/capabilities": caps, "/v2/status": valid_status()}).get_capabilities()
+
+
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda c: c.pop("economic_guidance"),
+        lambda c: c["route_product_policy"].pop("economic_guidance"),
+        lambda c: c["route_product_policy"]["economic_guidance"].update(as_of="2099-01-01"),
+        lambda c: c["route_product_policy"].update(amount_conditioned_routes={"ethereum:USDC->base:USDC": 500}),
+        lambda c: c["economic_guidance"]["confidence_counts"].update(structural_estimate=38),
+        lambda c: c["evaluation_guidance"].update(native_usdc_economic_evaluation_start_usd=50),
+    ],
+)
+def test_capabilities_route_specific_economic_guidance_fail_closed(mut):
+    caps = valid_caps(); mut(caps)
+    with pytest.raises(AssetFareError):
         client({"/v2/capabilities": caps, "/v2/status": valid_status()}).get_capabilities()
 
 
@@ -799,6 +880,8 @@ def test_quote_exact_body_and_bounded_return():
     assert out["execution_supported"] is True
     assert out["source_only"] is False
     assert out["evaluation_guidance"] == EVALUATION_GUIDANCE
+    assert out["economic_guidance"] == ROUTE_ECONOMIC_GUIDANCE
+    assert out["economic_guidance_url"] == "https://assetfare.dev/route-economics.json"
     assert out["server_signs_or_submits"] is False
     summary = out["direct_route_summary"]
     assert summary["version"] == "assetfare-direct-route-summary-v1"
@@ -835,16 +918,32 @@ def test_quote_exact_body_and_bounded_return():
     assert "input_base_bounds" not in descriptor
 
 
-def test_across_quote_exposes_honest_external_intent_caveat():
+@pytest.mark.parametrize(
+    "mut",
+    [
+        lambda q: q.pop("economic_guidance"),
+        lambda q: q["economic_guidance"].update(native_usdc_economic_evaluation_start_usd=50),
+        lambda q: q["economic_guidance"].update(advisory_start_usd=75),
+        lambda q: q["economic_guidance"].update(not_an_execution_minimum=False),
+    ],
+)
+def test_quote_route_specific_economic_guidance_fail_closed(mut):
+    q = with_cost_summary(valid_quote("solana", "USDC", "base", "USDC", 1000)); mut(q)
+    with pytest.raises(AssetFareError, match="assetfare_route_economic_guidance_invalid"):
+        client({"/v2/quote": q}).get_quote("solana", "USDC", "base", "USDC", 1000)
+
+
+def test_robinhood_ingress_exposes_direct_paxos_path():
     q = with_cost_summary(valid_quote("base", "USDC", "robinhood", "USDG", 250))
     out = client({"/v2/quote": q}).get_quote("base", "USDC", "robinhood", "USDG", 250)
     summary = out["direct_route_summary"]
-    assert summary["classification"] == "external_intent"
+    assert summary["classification"] == "direct_protocol_only"
+    assert summary["product_classification"] == "primary_direct"
+    assert summary["route_minimum_guard_bps"] == 50
     assert summary["route_aggregator_used"] is False
-    assert summary["external_intent_protocol_used"] is True
-    assert summary["provider_internal_dex_aggregation_possible"] is True
-    assert summary["steps"][0]["provider"] == "across_intent_bridge"
-    assert summary["steps"][0]["direct_protocol"] is False
+    assert summary["external_intent_protocol_used"] is False
+    assert [step["provider"] for step in summary["steps"]] == ["circle_cctp", "orca_whirlpool", "paxos_usdg_layerzero_oft"]
+    assert sum(step["minimum_guard_bps"] for step in summary["steps"]) == 50
 
 
 @pytest.mark.parametrize(
@@ -945,26 +1044,22 @@ def test_typed_payload_hash_preserves_number_string_and_negative_zero_and_reject
         AssetFareClient._quote_payload_sha256(invalid_unicode, invalid_unicode["direct_route_summary"])
 
 
-def test_robinhood_ingress_cannot_be_collusively_relabelled_direct():
+def test_robinhood_ingress_cannot_be_relabelled_external():
     q = with_cost_summary(valid_quote("base", "USDC", "robinhood", "USDG", 250))
-    raw = q["route"]["steps"][0]
-    raw.update(provider="circle_cctp", asset="USDC")
-    raw.pop("from_asset")
-    raw.pop("to_asset")
-    q["route"]["external_intent_protocol_used"] = False
-    q["risk"]["external_intent_protocol_used"] = False
-    q["risk"]["provider_internal_dex_aggregation_possible"] = False
+    q["route"]["steps"][2].update(provider="across_intent_bridge", external_intent_protocol=True)
+    q["route"]["external_intent_protocol_used"] = True
+    q["risk"]["external_intent_protocol_used"] = True
+    q["risk"]["provider_internal_dex_aggregation_possible"] = True
     summary = q["direct_route_summary"]
     summary.update(
-        classification="direct_protocol_only",
-        external_intent_protocol_used=False,
-        provider_internal_dex_aggregation_possible=False,
+        classification="external_intent",
+        external_intent_protocol_used=True,
+        provider_internal_dex_aggregation_possible=True,
     )
-    summary["steps"][0].update(
-        provider="circle_cctp",
-        to="robinhood:USDC",
-        direct_protocol=True,
-        external_intent_protocol=False,
+    summary["steps"][2].update(
+        provider="across_intent_bridge",
+        direct_protocol=False,
+        external_intent_protocol=True,
     )
     with pytest.raises(AssetFareError, match="assetfare_direct_route_summary_invalid"):
         client({"/v2/quote": q}).get_quote("base", "USDC", "robinhood", "USDG", 250)
@@ -1060,6 +1155,18 @@ def test_source_only_quote_execution_ready():
     assert "handoff_schema_version" not in out
 
 
+@pytest.mark.parametrize(
+    ("source", "destination"),
+    [("ethereum", "base"), ("ethereum", "solana"), ("hyperevm", "base"), ("hyperevm", "solana")],
+)
+def test_expansion_source_only_quote_execution_ready(source, destination):
+    q = valid_quote(source, "USDC", destination, "USDC", 500, source_only=True, fee=1)
+    out = client({"/v2/quote": q}).get_quote(source, "USDC", destination, "USDC", 500)
+    assert out["source_only"] is True
+    assert out["direct_route_summary"]["mode"] == "cctp_direct_composition"
+    assert out["economic_guidance"]["not_an_execution_minimum"] is True
+
+
 def test_quote_only_client_has_no_action_methods():
     forbidden = {
         "prepare",
@@ -1115,16 +1222,16 @@ def test_source_only_fee_collectible_now_false_rejected():
 
 
 # ---- route enumeration ----
-def test_all_76_routes_generated_and_executable():
+def test_all_80_routes_generated_and_executable():
     routes = all_routes()
-    assert len(routes) == 76
+    assert len(routes) == 80
     executable = [r for r in routes if r[0] not in SOURCE_ONLY_CHAINS]
     source_only = [r for r in routes if r[0] in SOURCE_ONLY_CHAINS]
     assert len(executable) == 72
-    assert len(source_only) == 4
+    assert len(source_only) == 8
 
 
-@pytest.mark.parametrize("dest", ["polygon", "optimism"])
+@pytest.mark.parametrize("dest", ["ethereum", "hyperevm", "polygon", "optimism"])
 def test_source_only_destination_rejected(dest):
     with pytest.raises(AssetFareError):
         client({}).get_quote("solana", "USDC", dest, "USDC", 100)

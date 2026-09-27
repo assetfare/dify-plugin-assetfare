@@ -16,9 +16,9 @@ class AssetFareCapabilitiesTool(Tool):
             return
         value = dict(result)
         value["next_step"] = (
-            "Treat USD 1 only as a reachability/response-shape smoke test. USD 50 is the lowest observed "
-            "native-USDC winning bucket, not a guarantee, and USD 1,000 is the representative economic "
-            "example. Request fresh AssetFare and competitor quotes for the actual intended amount, inspect "
+            "Treat USD 1 only as a reachability/response-shape smoke test. Read the route-specific guidance "
+            "at https://assetfare.dev/route-economics.json; there is no global native-USDC starting amount. "
+            "USD 1,000 is a documentation example only. Request fresh AssetFare and competitor quotes for the actual intended amount, inspect "
             "total token-path cost, minimum receive, ETA, and live availability, and never assume AssetFare "
             "is always cheapest. This Marketplace plugin is strictly read-only and exposes no wallet, authentication, "
             "prepare, session, signing, submission, funding, swap, or bridge-execution tool."

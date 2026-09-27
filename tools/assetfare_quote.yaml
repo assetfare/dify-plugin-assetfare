@@ -6,18 +6,18 @@ identity:
     zh_Hans: 查询 AssetFare 路由报价
 description:
   human:
-    en_US: Get one fresh, fee-inclusive non-custodial quote with a validated ordered direct-route summary showing protocols, endpoints, base-unit amounts, and the exact 1bp fee step. AssetFare uses no market-wide route-aggregator API; Across external_intent routes may internally source or aggregate destination liquidity. USD 1 is smoke-only; evaluate economics from USD 50 for native USDC and use USD 1,000 as the representative example, with no advantage guaranteed. Compare fresh quotes at the actual intended amount. Read-only.
-    zh_Hans: 获取一次包含费用的非托管报价，并附带经过验证且按顺序排列的直接路由摘要，展示协议、端点、基础单位金额和精确 1bp 的收费步骤。AssetFare 不调用全市场路由聚合 API；Across external_intent 路由可能在内部寻找或聚合目标端流动性。1 美元仅用于冒烟测试；原生 USDC 从 50 美元起评估经济性，1,000 美元作为代表性示例，但不保证具有优势。应按实际预计金额比较最新报价。只读。
+    en_US: Get one fresh fee-inclusive direct_protocol_only quote with required route-specific economic_guidance, advisory_start_usd, an ordered direct-route summary, and the exact 1bp fee step. USD 1 is smoke-only; guidance is never a minimum or ranking and no global native-USDC starting amount exists. Compare fresh quotes at the actual amount. Read-only.
+    zh_Hans: 获取一次包含费用的 direct_protocol_only 报价，并附带必需的按路由 economic_guidance、advisory_start_usd、有序直接路由摘要和精确 1bp 收费步骤。1 美元仅用于冒烟测试；指引不是最低额或排名，且不存在全局原生 USDC 起始金额。请按实际金额比较最新报价。只读。
   llm: >-
     Request one fresh AssetFare quote with expected/minimum receive, total token-path cost, provider fee
     components, ETA, live availability, direct_route_summary, and a sanitized continuation_descriptor. Treat direct_route_summary as the validated
     ordered path: every step names the protocol, normalized endpoints, expected/minimum base-unit inputs and
     outputs, direct-versus-external classification, and the one exact 1bp fee index.
-    route_aggregator_used=false means AssetFare did not call a market-wide aggregator API; external_intent
-    means an Across step whose provider may internally source or aggregate destination liquidity, not an
-    AssetFare aggregator call. The USD 1 technical minimum is only for reachability/response-shape smoke tests,
-    never economics. USD 50 is the lowest observed native-USDC winning bucket/evaluation start, not a guarantee.
-    USD 1,000 is the primary representative economic example. Always fetch fresh AssetFare and competitor
+    route_aggregator_used=false means AssetFare did not call a market-wide aggregator API. All 80 current
+    routes are direct_protocol_only; external_intent remains only a compatibility enum with zero current routes.
+    The USD 1 technical minimum is only for reachability/response-shape smoke tests.
+    Require economic_guidance.advisory_start_usd for this exact route and use
+    https://assetfare.dev/route-economics.json; no global native-USDC starting amount exists. Always fetch fresh AssetFare and competitor
     quotes at the actual intended amount and never claim AssetFare is always cheapest. The descriptor exposes
     an unranked expiring quote binding, wallet-chain/event-signer requirements, permitted mode, and the full
     OpenAPI URL. This tool never generates approval_v3, selects a mode, collects wallets, or calls prepare/session;
@@ -34,7 +34,7 @@ parameters:
     human_description:
       en_US: The source chain to move value from.
       zh_Hans: 转出价值的源链。
-    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism; Polygon and Optimism are native-USDC source-only origins to Base or Arbitrum; check live availability
+    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism, ethereum, hyperevm; Polygon/Optimism go only to Base/Arbitrum USDC, while Ethereum/HyperEVM go only to Base/Solana USDC; check live availability
     options:
       - value: solana
         label: {en_US: solana, zh_Hans: solana}
@@ -48,6 +48,10 @@ parameters:
         label: {en_US: polygon, zh_Hans: polygon}
       - value: optimism
         label: {en_US: optimism, zh_Hans: optimism}
+      - value: ethereum
+        label: {en_US: ethereum, zh_Hans: ethereum}
+      - value: hyperevm
+        label: {en_US: hyperevm, zh_Hans: hyperevm}
   - name: from_token
     type: select
     required: true

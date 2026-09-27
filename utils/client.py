@@ -46,14 +46,14 @@ _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 60
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
-_CHAINS = ("arbitrum", "base", "optimism", "polygon", "robinhood", "solana")
+_CHAINS = ("arbitrum", "base", "ethereum", "hyperevm", "optimism", "polygon", "robinhood", "solana")
 # Source chains that MAY be used in a quote. Destinations exclude
 # the source-only chains.
 _DESTINATION_CHAINS = frozenset({"solana", "base", "arbitrum", "robinhood"})
 # Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
 # are never a destination. Their four directional corridors are execution-ready
 # through the same live quote surface as every other route.
-_SOURCE_ONLY_CHAINS = frozenset({"optimism", "polygon"})
+_SOURCE_ONLY_CHAINS = frozenset({"ethereum", "hyperevm", "optimism", "polygon"})
 _ENDPOINTS = frozenset(
     {
         ("solana", "SOL"),
@@ -67,45 +67,102 @@ _ENDPOINTS = frozenset(
         ("robinhood", "USDG"),
         ("polygon", "USDC"),
         ("optimism", "USDC"),
+        ("ethereum", "USDC"),
+        ("hyperevm", "USDC"),
     }
 )
-_SOURCE_ONLY_ENDPOINTS = frozenset({("optimism", "USDC"), ("polygon", "USDC")})
+_SOURCE_ONLY_ENDPOINTS = frozenset({("ethereum", "USDC"), ("hyperevm", "USDC"), ("optimism", "USDC"), ("polygon", "USDC")})
 _SOURCE_ONLY_ROUTES = frozenset(
     {
         "polygon:USDC->base:USDC",
         "polygon:USDC->arbitrum:USDC",
         "optimism:USDC->base:USDC",
         "optimism:USDC->arbitrum:USDC",
+        "ethereum:USDC->base:USDC",
+        "ethereum:USDC->solana:USDC",
+        "hyperevm:USDC->base:USDC",
+        "hyperevm:USDC->solana:USDC",
     }
 )
 _ROUTES=frozenset(
     f"{fc}:{ft}->{tc}:{tt}"
     for fc,ft in _ENDPOINTS for tc,tt in _ENDPOINTS
     if tc in _DESTINATION_CHAINS and (fc,ft)!=(tc,tt)
-    and (fc not in _SOURCE_ONLY_CHAINS or (ft=="USDC" and tc in {"base","arbitrum"} and tt=="USDC"))
+    and (
+        fc not in _SOURCE_ONLY_CHAINS
+        or (fc in {"optimism", "polygon"} and ft=="USDC" and tc in {"base","arbitrum"} and tt=="USDC")
+        or (fc in {"ethereum", "hyperevm"} and ft=="USDC" and tc in {"base","solana"} and tt=="USDC")
+    )
 )
-_EXPECTED_ROUTES = 76  # directed quote-discovery routes (6-chain surface)
-_EXECUTION_READY_ROUTES = 76
+_EXPECTED_ROUTES = 80  # directed quote-discovery routes (8-chain surface)
+_EXECUTION_READY_ROUTES = 80
 _PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
 
 _EVALUATION_GUIDANCE = {
-    "schema_version": 1,
+    "schema_version": 2,
     "route_minimum_usd": 1,
     "reachability_smoke_usd": 1,
     "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
-    "native_usdc_economic_evaluation_start_usd": 50,
-    "representative_economic_evaluation_usd": 1000,
-    "sol_input_representative_evaluation_usd": 1000,
+    "route_specific_guidance": {
+        "version": "assetfare-route-economic-guidance-v1",
+        "url": "https://assetfare.dev/route-economics.json",
+        "required_on_every_quote": True,
+        "controls_evaluation_start": True,
+        "values_change_with_market": True,
+    },
+    "documentation_example_usd": 1000,
+    "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
     "sol_input_caveat": (
         "SOL-input routes add a source swap, so compare their full fee-inclusive route economics separately."
     ),
-    "evidence_as_of": "2026-09-23",
-    "evidence_scope": "Dated Solana native USDC to Base native USDC measurements at USD 50, 250, and 1000.",
+    "historical_observation": {
+        "route": "solana:USDC->base:USDC",
+        "observed_competitive_bucket_usd": 50,
+        "evidence_as_of": "2026-09-23",
+        "not_generalizable": True,
+    },
     "not_a_minimum": True,
     "not_guaranteed_best": True,
     "always_compare_fresh_at_intended_amount": True,
 }
+
+_ROUTE_GUIDANCE_KEYS = frozenset(
+    {
+        "advisory_start_usd", "advisory_role", "status", "confidence", "basis",
+        "tested_amounts_usd", "not_an_execution_minimum",
+        "not_a_best_price_guarantee", "fresh_quote_required",
+    }
+)
+_GUIDANCE_STARTS = frozenset({50, 100, 250, 500, 1000, 2500, 5000, 10000})
+_GUIDANCE_ROLES = frozenset(
+    {
+        "observed_economic_zone_start",
+        "structural_evaluation_start_not_observed_eligibility",
+        "retest_start_not_economic_eligibility",
+    }
+)
+_GUIDANCE_STATUSES = frozenset(
+    {
+        "observed_near_parity", "observed_competitive_or_near_parity",
+        "provisional_evaluation_start", "reworked_route_remeasure",
+        "coverage_only_retest",
+    }
+)
+_GUIDANCE_CONFIDENCE = frozenset(
+    {
+        "measured_two_day", "measured_route_specific", "structural_estimate",
+        "reworked_route_remeasure", "coverage_only_retest",
+    }
+)
+_CAPABILITY_GUIDANCE_KEYS = frozenset(
+    {
+        "version", "as_of", "route_count", "currency", "technical_quote_minimum_usd",
+        "economic_guidance_is_non_enforcing", "amount_is_never_rejected_by_economic_guidance",
+        "values_change_with_market", "fresh_quote_and_caller_decision_control",
+        "update_policy", "confidence_counts", "advisory_start_distribution",
+    }
+)
 
 _FEE_COLLECTION_CONST = "only_on_eligible_successful_executor_step"
 _DIRECT_SUMMARY_VERSION = "assetfare-direct-route-summary-v1"
@@ -115,6 +172,7 @@ _DIRECT_SUMMARY_MODES = frozenset(
         "same_chain_direct_composition",
         "cctp_direct_composition",
         "robinhood_paxos_egress_composition",
+        "robinhood_paxos_ingress_composition",
         "robinhood_across_ingress_composition",
         "polygon_source_cctp",
         "optimism_source_cctp",
@@ -126,6 +184,7 @@ _DIRECT_SUMMARY_PROVIDERS = frozenset(
         "orca_whirlpool",
         "uniswap_v3",
         "circle_cctp",
+        "circle_cctp_receive",
         "paxos_usdg_layerzero_oft",
         "across_intent_bridge",
     }
@@ -140,6 +199,11 @@ _DIRECT_SUMMARY_KEYS = frozenset(
         "to",
         "classification",
         "mode",
+        "product_classification",
+        "economic_eligibility",
+        "public_execution_eligible",
+        "primary_selection_eligible",
+        "route_minimum_guard_bps",
         "route_aggregator_used",
         "external_intent_protocol_used",
         "provider_internal_dex_aggregation_possible",
@@ -471,6 +535,65 @@ class AssetFareClient:
         return dict(_EVALUATION_GUIDANCE)
 
     @staticmethod
+    def _route_economic_guidance(value: Any) -> dict[str, Any]:
+        if type(value) is not dict or set(value) != _ROUTE_GUIDANCE_KEYS:
+            _fail("assetfare_route_economic_guidance_invalid")
+        tested = value.get("tested_amounts_usd")
+        if (
+            value.get("advisory_start_usd") not in _GUIDANCE_STARTS
+            or value.get("advisory_role") not in _GUIDANCE_ROLES
+            or value.get("status") not in _GUIDANCE_STATUSES
+            or value.get("confidence") not in _GUIDANCE_CONFIDENCE
+            or not isinstance(value.get("basis"), str)
+            or not value["basis"]
+            or not isinstance(tested, list)
+            or len(tested) > 8
+            or any(not _int(amount) or amount <= 0 for amount in tested)
+            or value.get("not_an_execution_minimum") is not True
+            or value.get("not_a_best_price_guarantee") is not True
+            or value.get("fresh_quote_required") is not True
+        ):
+            _fail("assetfare_route_economic_guidance_invalid")
+        return dict(value)
+
+    @staticmethod
+    def _capability_economic_guidance(caps: dict[str, Any]) -> dict[str, Any]:
+        top = caps.get("economic_guidance")
+        policy = caps.get("route_product_policy")
+        if type(top) is not dict or set(top) != _CAPABILITY_GUIDANCE_KEYS or type(policy) is not dict:
+            _fail("assetfare_economic_guidance_invalid")
+        nested = policy.get("economic_guidance")
+        counts = top.get("confidence_counts")
+        distribution = top.get("advisory_start_distribution")
+        conditioned = policy.get("amount_conditioned_routes")
+        if (
+            nested != top
+            or top.get("version") != "assetfare-route-economic-guidance-v1"
+            or not isinstance(top.get("as_of"), str)
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}", top["as_of"]) is None
+            or top.get("route_count") != 80
+            or top.get("currency") != "USD"
+            or top.get("technical_quote_minimum_usd") != 1
+            or top.get("economic_guidance_is_non_enforcing") is not True
+            or top.get("amount_is_never_rejected_by_economic_guidance") is not True
+            or top.get("values_change_with_market") is not True
+            or top.get("fresh_quote_and_caller_decision_control") is not True
+            or top.get("update_policy") != "append_daily_observations_then_replace_values_without_schema_change"
+            or type(counts) is not dict
+            or set(counts) != {"measured_two_day", "measured_route_specific", "structural_estimate", "reworked_route_remeasure", "coverage_only_retest"}
+            or any(not _int(value) or value < 0 for value in counts.values())
+            or sum(counts.values()) != 80
+            or type(distribution) is not dict
+            or set(distribution) != {"50", "100", "250", "500", "1000", "2500", "5000", "10000"}
+            or any(not _int(value) or value < 0 for value in distribution.values())
+            or sum(distribution.values()) != 80
+            or conditioned != {}
+            or policy.get("economic_guidance_url") != "https://assetfare.dev/route-economics.json"
+        ):
+            _fail("assetfare_economic_guidance_invalid")
+        return dict(top)
+
+    @staticmethod
     def _summary_amount(value: Any) -> str:
         if not isinstance(value, str) or _POSITIVE_BASE_AMOUNT_STRING.fullmatch(value) is None:
             _fail("assetfare_direct_route_summary_invalid")
@@ -497,7 +620,10 @@ class AssetFareClient:
 
         if from_chain in _SOURCE_ONLY_CHAINS:
             add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
-            return f"{from_chain}_source_cctp", False, path
+            if from_chain in {"optimism", "polygon"}:
+                path.append(("circle_cctp_receive", f"{to_chain}:USDC", f"{to_chain}:USDC"))
+            mode = f"{from_chain}_source_cctp" if from_chain in {"optimism", "polygon"} else "cctp_direct_composition"
+            return mode, False, path
         if from_chain == to_chain:
             composed = from_chain == "solana" and {from_token, to_token} == {"SOL", "USDG"}
             if composed:
@@ -526,18 +652,20 @@ class AssetFareClient:
             if from_chain == "solana":
                 if from_token == "SOL":
                     add_swap("solana", "SOL", "USDC")
-                elif from_token == "USDG":
-                    add_swap("solana", "USDG", "USDC")
-                add_bridge("circle_cctp", "solana", "base", "USDC", "USDC")
-                across_source = "base"
+                if from_token != "USDG":
+                    add_swap("solana", "USDC", "USDG")
+                add_bridge("paxos_usdg_layerzero_oft", "solana", "robinhood", "USDG", "USDG")
+                if to_token == "ETH":
+                    add_swap("robinhood", "USDG", "ETH")
             else:
                 if from_token == "ETH":
                     add_swap(from_chain, "ETH", "USDC")
-                across_source = from_chain
-            add_bridge("across_intent_bridge", across_source, "robinhood", "USDC", "USDG")
-            if to_token == "ETH":
-                add_swap("robinhood", "USDG", "ETH")
-            return "robinhood_across_ingress_composition", True, path
+                add_bridge("circle_cctp", from_chain, "solana", "USDC", "USDC")
+                add_swap("solana", "USDC", "USDG")
+                add_bridge("paxos_usdg_layerzero_oft", "solana", "robinhood", "USDG", "USDG")
+                if to_token == "ETH":
+                    add_swap("robinhood", "USDG", "ETH")
+            return "robinhood_paxos_ingress_composition", False, path
         if from_token != "USDC":
             add_swap(from_chain, from_token, "USDC")
         add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
@@ -555,6 +683,9 @@ class AssetFareClient:
             source_asset = step.get("from_asset") if provider == "across_intent_bridge" else step.get("asset")
             destination_asset = step.get("to_asset") if provider == "across_intent_bridge" else step.get("asset")
             return "bridge", f"{step.get('from')}:{source_asset}", f"{step.get('to')}:{destination_asset}"
+        if provider == "circle_cctp_receive" and step.get("kind") == "direct_receive":
+            chain = step.get("chain")
+            return "receive", f"{chain}:{step.get('from')}", f"{chain}:{step.get('to')}"
         _fail("assetfare_direct_route_summary_invalid")
 
     @classmethod
@@ -574,6 +705,7 @@ class AssetFareClient:
             _fail("assetfare_direct_route_summary_invalid")
         expected_route = f"{expected_from}->{expected_to}"
         expected_mode, expected_external, expected_path = cls._expected_direct_route(expected_from, expected_to)
+        expected_guard = 50 if expected_mode == "robinhood_paxos_ingress_composition" else None
         if (
             value.get("version") != _DIRECT_SUMMARY_VERSION
             or value.get("route") != expected_route
@@ -581,6 +713,11 @@ class AssetFareClient:
             or value.get("to") != expected_to
             or value.get("mode") not in _DIRECT_SUMMARY_MODES
             or value.get("mode") != expected_mode
+            or value.get("product_classification") != "primary_direct"
+            or value.get("economic_eligibility") != "not_asserted_by_capability"
+            or value.get("public_execution_eligible") is not True
+            or value.get("primary_selection_eligible") is not True
+            or value.get("route_minimum_guard_bps") != expected_guard
             or value.get("route_aggregator_used") is not False
             or value.get("assetfare_fee_bps") != 1
             or value.get("server_signing") is not False
@@ -609,14 +746,16 @@ class AssetFareClient:
         previous_minimum_output = None
         any_external = False
         fee_total = 0
+        guard_total = 0
         for index, (step, raw_step) in enumerate(zip(summary_steps, raw_steps, strict=True)):
-            if not isinstance(step, dict) or set(step) != _DIRECT_SUMMARY_STEP_KEYS:
+            expected_step_keys = _DIRECT_SUMMARY_STEP_KEYS | ({"minimum_guard_bps"} if expected_guard is not None else set())
+            if not isinstance(step, dict) or set(step) != expected_step_keys:
                 _fail("assetfare_direct_route_summary_invalid")
             if step.get("index") != index or step.get("provider") not in _DIRECT_SUMMARY_PROVIDERS:
                 _fail("assetfare_direct_route_summary_invalid")
             provider = step["provider"]
             external = provider == "across_intent_bridge"
-            action = "swap" if provider in _SWAP_PROVIDERS else "bridge"
+            action = "swap" if provider in _SWAP_PROVIDERS else "receive" if provider == "circle_cctp_receive" else "bridge"
             expected_provider, expected_step_from, expected_step_to = expected_path[index]
             if (
                 provider != expected_provider
@@ -632,6 +771,11 @@ class AssetFareClient:
                 }
             ):
                 _fail("assetfare_direct_route_summary_invalid")
+            if expected_guard is not None:
+                guard = step.get("minimum_guard_bps")
+                if not _int(guard) or not 1 <= guard <= 500 or raw_step.get("minimum_guard_bps") != guard:
+                    _fail("assetfare_direct_route_summary_invalid")
+                guard_total += guard
             expected_input = cls._summary_amount(step.get("expected_input_base"))
             minimum_input = cls._summary_amount(step.get("minimum_input_base"))
             expected_output = cls._summary_amount(step.get("expected_output_base"))
@@ -683,6 +827,7 @@ class AssetFareClient:
 
         if (
             fee_total != 1
+            or guard_total != (expected_guard or 0)
             or any_external is not expected_external
             or value.get("classification") != ("external_intent" if any_external else "direct_protocol_only")
             or value.get("external_intent_protocol_used") is not any_external
@@ -695,6 +840,7 @@ class AssetFareClient:
             or route.get("external_intent_protocol_used") is not any_external
             or risk.get("external_intent_protocol_used") is not any_external
             or risk.get("provider_internal_dex_aggregation_possible") is not any_external
+            or any(route.get(key) != value.get(key) for key in ("product_classification", "economic_eligibility", "public_execution_eligible", "primary_selection_eligible", "route_minimum_guard_bps"))
         ):
             _fail("assetfare_direct_route_summary_invalid")
         return dict(value)
@@ -967,7 +1113,7 @@ class AssetFareClient:
         status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
-        # All 76 directed routes are caller-approved and execution-ready.
+        # All 80 directed routes are caller-approved and execution-ready.
         if (
             caps.get("directed_conversion_routes") != _EXPECTED_ROUTES
             or caps.get("unsigned_route_plans_ready") != _EXPECTED_ROUTES
@@ -1024,6 +1170,7 @@ class AssetFareClient:
         ):
             _fail("assetfare_amount_policy_invalid")
         evaluation_guidance = self._evaluation_guidance(caps.get("evaluation_guidance"))
+        economic_guidance = self._capability_economic_guidance(caps)
         availability_keys={"execution_implemented_routes","currently_prepare_ready_routes","temporarily_unavailable_routes","temporarily_unavailable_route_count","execution_availability"}
         present=availability_keys & set(caps)
         if present and present!=availability_keys:
@@ -1054,6 +1201,8 @@ class AssetFareClient:
                 "policy": "no_business_maximum",
             },
             "evaluation_guidance": evaluation_guidance,
+            "economic_guidance": economic_guidance,
+            "economic_guidance_url": "https://assetfare.dev/route-economics.json",
             "quote_only_discovery": True,
             "server_signs_or_submits": False,
         }
@@ -1070,8 +1219,17 @@ class AssetFareClient:
         if to_chain in _SOURCE_ONLY_CHAINS:
             raise AssetFareError("assetfare_destination_endpoint_invalid")
         source_only = from_chain in _SOURCE_ONLY_CHAINS
-        if source_only and not (from_u == "USDC" and to_chain in {"base", "arbitrum"} and to_u == "USDC"):
-            raise AssetFareError("assetfare_source_endpoint_invalid")
+        if source_only:
+            allowed = (
+                from_u == "USDC"
+                and to_u == "USDC"
+                and (
+                    (from_chain in {"optimism", "polygon"} and to_chain in {"base", "arbitrum"})
+                    or (from_chain in {"ethereum", "hyperevm"} and to_chain in {"base", "solana"})
+                )
+            )
+            if not allowed:
+                raise AssetFareError("assetfare_source_endpoint_invalid")
         budget_deadline = self._monotonic() + _STALE_BUDGET_S
         data = self._request(
             "POST",
@@ -1091,6 +1249,7 @@ class AssetFareClient:
         route = self._obj(data, "route")
         risk = self._obj(data, "risk")
         execution = self._obj(data, "execution")
+        route_economic_guidance = self._route_economic_guidance(data.get("economic_guidance"))
 
         # top-level strict fields
         if data.get("status") != "capped_public_agent_release":
@@ -1263,6 +1422,8 @@ class AssetFareClient:
             "source_only": source_only,
             "execution_supported": True,
             "execution_blocker": None,
+            "economic_guidance": route_economic_guidance,
+            "economic_guidance_url": "https://assetfare.dev/route-economics.json",
             "evaluation_guidance": dict(_EVALUATION_GUIDANCE),
             "server_signs_or_submits": False,
         }

@@ -46,26 +46,20 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
 
 def test_manifest_separates_product_and_format_versions_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "1.0.1"
+    assert manifest["version"] == "1.0.2"
     # This is Dify's manifest-format version, not the AssetFare product version.
     assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
     assert "strictly read-only" in description
-    assert "no wallet or execution tools" in description
-    assert "usd 1 is the technical minimum and smoke-only" in description
-    assert "usd 50 is the lowest observed native-usdc winning bucket, not a guarantee" in description
-    assert "usd 1,000 is the representative economic example" in description
-    assert "actual intended amount" in description
-    assert "not always cheapest" in description
+    assert "never selects, prepares, signs, submits" in description
+    assert "80" in description and "direct_protocol_only" in description
+    assert "route-specific economic_guidance" in description
+    assert "no global native-usdc starting amount" in description
+    assert "route-economics.json" in description
     assert "ordered direct-route summary" in description
-    assert "route-aggregator api" in description
-    assert "across" in description and "internally" in description
-    assert "continuation_v3" in description
-    assert "never selects a mode" in description
-    assert "caller_approved alone is not human proof" in description
 
 
-def test_all_public_quote_descriptions_explain_external_intent_caveat():
+def test_all_public_quote_descriptions_explain_current_direct_only_scope():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
     provider = yaml.safe_load((ROOT / "provider/assetfare.yaml").read_text())
     quote = yaml.safe_load((ROOT / "tools/assetfare_quote.yaml").read_text())
@@ -81,17 +75,17 @@ def test_all_public_quote_descriptions_explain_external_intent_caveat():
         low = surface.lower()
         assert "direct-route summary" in low or "direct_route_summary" in low
         assert "1bp" in low
-        assert "across" in low
+        assert "direct_protocol_only" in low
     llm = quote["description"]["llm"].lower()
     assert "market-wide aggregator api" in llm
-    assert "internally source or aggregate destination liquidity" in llm
+    assert "zero current routes" in llm
 
 
 def test_manifest_economic_guidance_has_english_chinese_parity():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
     english = manifest["description"]["en_US"]
     chinese = manifest["description"]["zh_Hans"]
-    for marker in ("1", "50", "1,000", "AssetFare"):
+    for marker in ("80", "advisory_start_usd", "AssetFare"):
         assert marker in english
         assert marker in chinese
 
@@ -108,8 +102,8 @@ def test_tool_schemas_preserve_one_dollar_boundary_and_surface_guidance():
         capabilities["description"]["human"]["zh_Hans"],
     ):
         assert "1" in description
-        assert "50" in description
-        assert "1,000" in description
+        assert "global" in description.lower() or "全局" in description
+        assert "advisory_start_usd" in description
 
 
 def test_readme_gives_one_safe_dify_first_call_and_follow_up_path():

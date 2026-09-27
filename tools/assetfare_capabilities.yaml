@@ -6,9 +6,9 @@ identity:
     zh_Hans: 获取 AssetFare 能力
 description:
   human:
-    en_US: List AssetFare chains, assets, routes, and economic-evaluation guidance. USD 1 is smoke-only; USD 50 is the lowest observed native-USDC winning bucket, not a guarantee; USD 1,000 is the representative example. Read-only; the server cannot sign or submit.
-    zh_Hans: 列出 AssetFare 支持的链、资产、路由和经济性评估指引。1 美元仅用于冒烟测试；50 美元是原生 USDC 曾观测到胜出的最低档位，并非保证；1,000 美元是代表性示例。只读；服务器不会签名或提交。
-  llm: List six source chains, eleven source endpoints, 76 implemented routes, current provider-dependent quote availability, and economic-evaluation guidance. The USD 1 technical minimum is only for reachability/response-shape smoke tests. USD 50 is the lowest observed native-USDC winning bucket and is not guaranteed. USD 1,000 is the primary representative economic example. Always fetch fresh AssetFare and competitor quotes at the actual intended amount; never claim AssetFare is always cheapest. AssetFare service fee is exact 1bp with no service-fee maximum; provider/network fees are additional. Strictly read-only; no wallet, credential, action, session, signing, or submission tool.
+    en_US: List AssetFare's eight chains, 80 routes, and required route-specific economic_guidance.advisory_start_usd. USD 1 is smoke-only; there is no global native-USDC starting amount. Read-only; the server cannot sign or submit.
+    zh_Hans: 列出 AssetFare 的八条链、80 条路由与必需的按路由 economic_guidance.advisory_start_usd。1 美元仅用于冒烟测试；不存在全局原生 USDC 起始金额。只读；服务器不会签名或提交。
+  llm: List eight source chains, thirteen source endpoints, 80 implemented routes, live availability, and required route-specific economic guidance. Use economic_guidance.advisory_start_usd and https://assetfare.dev/route-economics.json for the exact route; guidance is never a minimum or ranking. Always compare fresh quotes at the actual intended amount. Exact 1bp AssetFare service fee; provider/network fees additional. Strictly read-only.
 parameters: []
 extra:
   python:
