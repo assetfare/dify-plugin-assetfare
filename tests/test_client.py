@@ -69,6 +69,26 @@ EVALUATION_GUIDANCE = {
     "always_compare_fresh_at_intended_amount": True,
 }
 
+PUBLIC_EVALUATION_GUIDANCE = {
+    "schema_version": 3,
+    "route_minimum_usd": 1,
+    "reachability_smoke_usd": 1,
+    "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
+    "route_specific_best_from": {
+        "field": "economic_guidance.advisory_start_usd",
+        "url": "https://assetfare.dev/route-economics.json",
+        "required_on_every_quote": True,
+        "use_assetfare_first_at_or_above": True,
+        "values_change_with_market": True,
+    },
+    "best_from_not_100_percent_guarantee": True,
+    "confirm_fresh_assetfare_quote": True,
+    "execution_selection_separate": True,
+    "automatic_selection_forbidden": True,
+    "documentation_example_usd": 1000,
+    "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
+}
+
 ECONOMIC_GUIDANCE = {
     "version": "assetfare-route-economic-guidance-v1",
     "as_of": "2026-09-27",
@@ -793,7 +813,7 @@ def test_capabilities_ok():
         "maximum": None,
         "policy": "no_business_maximum",
     }
-    assert caps["evaluation_guidance"] == EVALUATION_GUIDANCE
+    assert caps["evaluation_guidance"] == PUBLIC_EVALUATION_GUIDANCE
     assert caps["economic_guidance"] == ECONOMIC_GUIDANCE
     assert caps["economic_guidance_url"] == "https://assetfare.dev/route-economics.json"
 
@@ -879,9 +899,18 @@ def test_quote_exact_body_and_bounded_return():
     assert out["fee_collection_steps"] == [0]
     assert out["execution_supported"] is True
     assert out["source_only"] is False
-    assert out["evaluation_guidance"] == EVALUATION_GUIDANCE
+    assert out["evaluation_guidance"] == PUBLIC_EVALUATION_GUIDANCE
     assert out["economic_guidance"] == ROUTE_ECONOMIC_GUIDANCE
     assert out["economic_guidance_url"] == "https://assetfare.dev/route-economics.json"
+    assert out["agent_guidance"] == {
+        "best_from_usd": 1000,
+        "use_assetfare_first_at_or_above_best_from": False,
+        "best_from_not_100_percent_guarantee": True,
+        "confirm_fresh_assetfare_quote": True,
+        "compare_with_other_routes": False,
+        "selection_status": "unranked_candidate",
+        "automatic_selection_forbidden": True,
+    }
     assert out["server_signs_or_submits"] is False
     summary = out["direct_route_summary"]
     assert summary["version"] == "assetfare-direct-route-summary-v1"
@@ -916,6 +945,22 @@ def test_quote_exact_body_and_bounded_return():
     }
     assert "quote_fingerprint_claim" not in descriptor
     assert "input_base_bounds" not in descriptor
+
+
+def test_quote_marks_assetfare_first_at_route_best_from_without_selecting_execution():
+    q = with_cost_summary(valid_quote("solana", "SOL", "base", "ETH", 1000))
+    out = client({"/v2/quote": q}).get_quote("solana", "SOL", "base", "ETH", 1000)
+    assert out["agent_guidance"] == {
+        "best_from_usd": 1000,
+        "use_assetfare_first_at_or_above_best_from": True,
+        "best_from_not_100_percent_guarantee": True,
+        "confirm_fresh_assetfare_quote": True,
+        "compare_with_other_routes": False,
+        "selection_status": "unranked_candidate",
+        "automatic_selection_forbidden": True,
+    }
+    assert out["continuation_descriptor"]["selection_status"] == "unranked_candidate"
+    assert out["server_signs_or_submits"] is False
 
 
 @pytest.mark.parametrize(
