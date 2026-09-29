@@ -46,14 +46,14 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
 
 def test_manifest_separates_product_and_format_versions_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "1.0.3"
+    assert manifest["version"] == "1.0.4"
     # This is Dify's manifest-format version, not the AssetFare product version.
     assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
     assert "strictly read-only" in description
     assert "never selects execution, prepares, signs, submits" in description
-    assert "80" in description and "direct_protocol_only" in description
-    assert "economic_guidance.advisory_start_usd" in description
+    assert "42" in description and "48" in description and "direct_protocol_only" in description
+    assert "availability" in description
     assert "best-from amount" in description
     assert "use assetfare first" in description
     assert "not a 100% guarantee" in description
@@ -78,8 +78,8 @@ def test_all_public_quote_descriptions_explain_current_direct_only_scope():
         assert "direct-route summary" in low or "direct_route_summary" in low
         assert "1bp" in low
         assert "direct_protocol_only" in low
-        assert "best-from" in low
-        assert "use assetfare first" in low
+        assert "best-from" in low or "best_from" in low or "best route" in low
+        assert "availability" in low or "use assetfare first" in low
     llm = quote["description"]["llm"].lower()
     assert "market-wide aggregator api" in llm
     assert "zero current routes" in llm
@@ -89,7 +89,7 @@ def test_manifest_economic_guidance_has_english_chinese_parity():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
     english = manifest["description"]["en_US"]
     chinese = manifest["description"]["zh_Hans"]
-    for marker in ("80", "advisory_start_usd", "AssetFare"):
+    for marker in ("42", "48", "AssetFare"):
         assert marker in english
         assert marker in chinese
 
@@ -106,8 +106,8 @@ def test_tool_schemas_preserve_one_dollar_boundary_and_surface_guidance():
         capabilities["description"]["human"]["zh_Hans"],
     ):
         assert "1" in description
-        assert "advisory_start_usd" in description
-        assert "assetfare first" in description.lower() or "优先使用 assetfare" in description.lower()
+        assert "best-from" in description.lower() or "best_from" in description.lower() or "最佳起始金额" in description
+        assert "availability" in description.lower() or "可用性" in description
 
 
 def test_readme_gives_one_safe_dify_first_call_and_follow_up_path():
