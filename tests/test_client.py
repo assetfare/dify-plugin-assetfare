@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.client import AssetFareClient, AssetFareError, _AVAILABILITY_ONLY_ROUTES, _PRICE_VERIFIED_ROUTES, _ROUTES
+from utils.client import AssetFareClient, AssetFareError, _AVAILABILITY_ONLY_ROUTES, _PRICE_VERIFIED_ROUTES, _ROUTES, _SOURCE_ONLY_ENDPOINTS, _SOURCE_ONLY_ROUTES
 
 # Fixed "now" so the fixed-timestamp quote fixture (as_of 2026-09-17T00:00:00Z,
 # ttl 30) is fresh (10s in). Tests inject this so they do not depend on wall time.
@@ -54,10 +54,10 @@ EVALUATION_GUIDANCE = {
         "nullable_when_unverified": True,
         "controls_recommendation_only_when_verified": True,
         "values_change_with_market": True,
-        "catalog_routes": 90,
-        "public_active_routes": 42,
-        "public_inactive_routes": 48,
-        "availability_only_routes": 2,
+        "catalog_routes": 98,
+        "public_active_routes": 54,
+        "public_inactive_routes": 44,
+        "availability_only_routes": 10,
     },
     "documentation_example_usd": 1000,
     "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
@@ -80,24 +80,24 @@ PUBLIC_EVALUATION_GUIDANCE = EVALUATION_GUIDANCE
 ECONOMIC_GUIDANCE = {
     "version": "assetfare-route-economic-guidance-v3",
     "as_of": "2026-09-29",
-    "route_count": 90,
-    "public_active_route_count": 42,
-    "public_inactive_route_count": 48,
-    "verified_best_from_route_count": 40,
-    "availability_only_route_count": 2,
+    "route_count": 98,
+    "public_active_route_count": 54,
+    "public_inactive_route_count": 44,
+    "verified_best_from_route_count": 44,
+    "availability_only_route_count": 10,
     "currency": "USD",
     "technical_quote_minimum_usd": 1,
     "economic_guidance_is_non_enforcing": True,
     "amount_is_never_rejected_by_economic_guidance": True,
     "values_change_with_market": True,
     "fresh_quote_and_caller_decision_control": True,
-    "update_policy": "daily_measurement_with_three_day_activation_hysteresis",
+    "update_policy": "daily_measurement_with_three_day_reactivation_hysteresis",
     "first_use_zero_allowance_scenario": True,
     "expected_output_ranking": True,
     "incomplete_cost_never_promoted": True,
     "tested_ceiling_usd": 10000,
-    "advisory_start_distribution": {"50":5,"100":5,"250":5,"500":5,"1000":5,"2500":5,"5000":5,"10000":5},
-    "recommendation_status_counts": {"active_price_verified":40,"active_unique_availability":2,"inactive_economics":48},
+    "advisory_start_distribution": {"50":8,"100":5,"250":3,"500":6,"1000":2,"2500":5,"5000":12,"10000":3},
+    "recommendation_status_counts": {"active_price_verified":44,"active_availability_only":10,"inactive_economics":44},
 }
 ROUTE_ECONOMIC_GUIDANCE = {"advisory_start_usd":1000,"best_from_usd":1000,"best_from_verified":True,"availability_only":False,"public_activation_status":"active_price_verified","public_active":True,"recommendation_status":"active_price_verified","recommended_action":"use_assetfare_first_at_or_above_best_from","confidence":"paired_all_in_snapshot","basis":"offline_fixture_only","tested_amounts_usd":[50,100,250,500,1000,2500,5000,10000],"tested_ceiling_usd":10000,"not_an_execution_minimum":True,"not_a_best_price_guarantee":True,"fresh_quote_required":True}
 
@@ -122,16 +122,22 @@ ENDPOINTS = [
     ("xlayer", "USDC"),
     ("sei", "USDC"),
     ("sonic", "USDC"),
+    ("monad", "USDC"),
+    ("avalanche", "USDC"),
+    ("cronos", "USDC"),
+    ("injective", "USDC"),
+    ("linea", "USDC"),
+    ("aptos", "USDC"),
 ]
 
 # Chains that may only be a source, never a destination. Polygon/Optimism go
 # to Base/Arbitrum USDC; Ethereum/HyperEVM go to Base/Solana USDC.
-SOURCE_ONLY_CHAINS = {"ethereum", "hyperevm", "optimism", "sei", "sonic", "xlayer"}
+SOURCE_ONLY_CHAINS = {"ethereum", "hyperevm", "optimism", "sei", "sonic", "xlayer", "monad", "avalanche", "cronos", "injective", "linea", "aptos"}
 DESTINATION_ENDPOINTS = [(c, t) for (c, t) in ENDPOINTS if c not in SOURCE_ONLY_CHAINS]
 
 
 def all_routes():
-    """Return the exact 42 active execution-ready directed routes."""
+    """Return the exact 54 active execution-ready directed routes."""
     return [tuple(route.replace("->", ":").split(":")) for route in sorted(_ROUTES)]
 
 
@@ -139,18 +145,18 @@ def valid_caps():
     return {
         "status": "capped_public_agent_release",
         "public_api_enabled": True,
-        "directed_conversion_routes": 42,
-        "unsigned_route_plans_ready": 42,
-        "execution_ready_routes": 42,
-        "execution_implemented_routes": 42,
-        "currently_prepare_ready_routes": 42,
+        "directed_conversion_routes": 54,
+        "unsigned_route_plans_ready": 54,
+        "execution_ready_routes": 54,
+        "execution_implemented_routes": 54,
+        "currently_prepare_ready_routes": 54,
         "temporarily_unavailable_routes": [],
         "temporarily_unavailable_route_count": 0,
         "execution_availability": {"status":"available","provider":"circle_iris","provider_dependent_routes":50,"recent_fee_snapshot_usable":True,"guarantees_future_availability":False},
         "phase_b_blocked_routes": 0,
         "server_signing": False,
         "server_submission": False,
-        "chains": ["arbitrum", "base", "ethereum", "hyperevm", "optimism", "robinhood", "sei", "solana", "sonic", "xlayer"],
+        "chains": ["aptos", "arbitrum", "avalanche", "base", "cronos", "ethereum", "hyperevm", "injective", "linea", "monad", "optimism", "robinhood", "sei", "solana", "sonic", "xlayer"],
         "asset_endpoints": [{"chain": c, "token": t} for c, t in ENDPOINTS],
         "source_only_asset_endpoints": [
             {"chain": "optimism", "token": "USDC"},
@@ -159,6 +165,12 @@ def valid_caps():
             {"chain": "xlayer", "token": "USDC"},
             {"chain": "sei", "token": "USDC"},
             {"chain": "sonic", "token": "USDC"},
+            {"chain": "monad", "token": "USDC"},
+            {"chain": "avalanche", "token": "USDC"},
+            {"chain": "cronos", "token": "USDC"},
+            {"chain": "injective", "token": "USDC"},
+            {"chain": "linea", "token": "USDC"},
+            {"chain": "aptos", "token": "USDC"},
         ],
         "source_only_routes": [
             "optimism:USDC->base:USDC",
@@ -170,12 +182,13 @@ def valid_caps():
             "sei:USDC->solana:USDC",
             "sonic:USDC->base:USDC",
             "sonic:USDC->solana:USDC",
+            *[f"{chain}:USDC->{destination}:USDC" for chain in ("monad","avalanche","cronos","injective","linea","aptos") for destination in ("base","solana")],
         ],
         "blocked_source_only_routes": [],
         "amount_usd": {"minimum": 1, "maximum": None, "policy": "no_business_maximum"},
         "evaluation_guidance": dict(EVALUATION_GUIDANCE),
         "economic_guidance": copy.deepcopy(ECONOMIC_GUIDANCE),
-        "route_product_policy": {"primary_direct_route_count":42,"external_coverage_only_route_count":0,"paxos_direct_ingress_routes":[],"active_route_count":42,"inactive_route_count":48,"inactive_routes":[f"inactive-{index}" for index in range(48)],"amount_conditioned_routes":{route:1000 for route in _PRICE_VERIFIED_ROUTES},"economic_guidance": copy.deepcopy(ECONOMIC_GUIDANCE), "economic_guidance_url": "https://assetfare.dev/route-economics.json","automatic_external_fallback_forbidden":True},
+        "route_product_policy": {"primary_direct_route_count":54,"external_coverage_only_route_count":0,"paxos_direct_ingress_routes":[],"active_route_count":54,"inactive_route_count":44,"inactive_routes":[f"inactive-{index}" for index in range(44)],"amount_conditioned_routes":{route:1000 for route in _PRICE_VERIFIED_ROUTES},"economic_guidance": copy.deepcopy(ECONOMIC_GUIDANCE), "economic_guidance_url": "https://assetfare.dev/route-economics.json","automatic_external_fallback_forbidden":True},
     }
 
 
@@ -382,7 +395,7 @@ def valid_quote(fc, ft, tc, tt, amount, *, source_only=False, fee=1):
     handoff = executable_handoff()
     route_guidance=copy.deepcopy(ROUTE_ECONOMIC_GUIDANCE)
     if f"{fc}:{ft}->{tc}:{tt}" in _AVAILABILITY_ONLY_ROUTES:
-        route_guidance.update(advisory_start_usd=None,best_from_usd=None,best_from_verified=False,availability_only=True,public_activation_status="active_unique_availability",recommendation_status="active_unique_availability",recommended_action="use_assetfare_when_route_availability_is_required")
+        route_guidance.update(advisory_start_usd=None,best_from_usd=None,best_from_verified=False,availability_only=True,public_activation_status="active_availability_only",recommendation_status="active_availability_only",recommended_action="use_assetfare_when_route_availability_is_required_without_price_claim",confidence="availability_only_no_price_claim")
     quote = {
         "quote_id": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         "status": "capped_public_agent_release",
@@ -780,22 +793,18 @@ def test_trust_env_disabled():
     assert s.trust_env is False
 
 
-# ---- capabilities (10-chain surface: 14 endpoints, exactly 42 active) ----
+# ---- capabilities (16-chain surface: 20 endpoints, exactly 54 active) ----
 def test_capabilities_ok():
     caps = client({"/v2/capabilities": valid_caps(), "/v2/status": valid_status()}).get_capabilities()
-    assert caps["directed_conversion_routes"] == 42
-    assert caps["unsigned_route_plans_ready"] == 42
-    assert caps["execution_ready_routes"] == 42
-    assert caps["currently_prepare_ready_routes"] == 42
+    assert caps["directed_conversion_routes"] == 54
+    assert caps["unsigned_route_plans_ready"] == 54
+    assert caps["execution_ready_routes"] == 54
+    assert caps["currently_prepare_ready_routes"] == 54
     assert caps["phase_b_blocked_routes"] == 0
-    assert len(caps["asset_endpoints"]) == 14
+    assert len(caps["asset_endpoints"]) == 20
     assert caps["server_signs_or_submits"] is False
-    assert sorted(caps["source_only_asset_endpoints"]) == ["ethereum:USDC", "hyperevm:USDC", "optimism:USDC", "sei:USDC", "sonic:USDC", "xlayer:USDC"]
-    assert set(caps["source_only_routes"]) == {
-        "optimism:USDC->base:USDC", "ethereum:USDC->solana:USDC", "hyperevm:USDC->solana:USDC",
-        "xlayer:USDC->base:USDC", "xlayer:USDC->solana:USDC", "sei:USDC->base:USDC",
-        "sei:USDC->solana:USDC", "sonic:USDC->base:USDC", "sonic:USDC->solana:USDC",
-    }
+    assert sorted(caps["source_only_asset_endpoints"]) == sorted(f"{chain}:{token}" for chain,token in _SOURCE_ONLY_ENDPOINTS)
+    assert set(caps["source_only_routes"]) == _SOURCE_ONLY_ROUTES
     assert caps["blocked_source_only_routes"] == []
     assert caps["amount_usd"] == {
         "minimum": 1.0,
@@ -966,7 +975,7 @@ def test_availability_only_sei_quote_has_no_cheapest_price_claim():
     assert out["agent_guidance"]["best_from_usd"] is None
     assert out["agent_guidance"]["best_from_verified"] is False
     assert out["agent_guidance"]["availability_only"] is True
-    assert out["agent_guidance"]["recommendation_status"]=="active_unique_availability"
+    assert out["agent_guidance"]["recommendation_status"]=="active_availability_only"
     assert out["agent_guidance"]["use_assetfare_first_at_or_above_best_from"] is False
 
 
@@ -1274,13 +1283,13 @@ def test_source_only_fee_collectible_now_false_rejected():
 
 
 # ---- route enumeration ----
-def test_all_42_routes_generated_and_executable():
+def test_all_54_routes_generated_and_executable():
     routes = all_routes()
-    assert len(routes) == 42
+    assert len(routes) == 54
     executable = [r for r in routes if r[0] not in SOURCE_ONLY_CHAINS]
     source_only = [r for r in routes if r[0] in SOURCE_ONLY_CHAINS]
     assert len(executable) == 33
-    assert len(source_only) == 9
+    assert len(source_only) == 21
 
 
 @pytest.mark.parametrize("dest", ["ethereum", "hyperevm", "polygon", "optimism", "sei", "sonic", "xlayer"])

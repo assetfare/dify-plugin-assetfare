@@ -6,14 +6,14 @@ identity:
     zh_Hans: AssetFare
   description:
     en_US: >-
-      Strictly read-only non-custodial cross-chain capabilities and fee-inclusive quotes across ten source
-      chains and 42 active routes; 40 have a verified best-from amount and two Sei routes are availability-only. Another 48 measured routes are inactive. Quotes expose a validated ordered direct-route summary: exact protocols,
-      endpoints, base-unit amounts, and the one 1bp fee step. All 42 active routes are direct_protocol_only;
+      Strictly read-only non-custodial cross-chain capabilities and fee-inclusive quotes across sixteen source
+      chains and 54 active routes; 44 have a verified best-from amount and ten routes are availability-only with no cheapest-price claim. Another 44 measured routes are inactive. Quotes expose a validated ordered direct-route summary: exact protocols,
+      endpoints, base-unit amounts, and the one 1bp fee step. All 54 active routes are direct_protocol_only;
       external_intent remains only a compatibility enum with zero current routes. No wallet, authentication, preparation, session, signing, submission,
       funding, swap, or bridge-execution tool.
     zh_Hans: >-
-      严格只读的非托管跨链能力与含费报价，覆盖十个源链和 42 条已启用路由；其中 40 条有已验证的最佳起始金额，两条 Sei 路由仅为可用性路由。另有 48 条已测量路由处于停用状态。报价公开经过验证且按顺序排列的直接路由摘要：精确的协议、端点、基础单位金额、唯一的
-      1bp 收费步骤。当前 42 条启用路由全部为 direct_protocol_only；external_intent 仅作为兼容枚举保留，当前路由数为零。不提供钱包、认证、准备、会话、签名、提交、资金、交换或跨链执行工具。
+      严格只读的非托管跨链能力与含费报价，覆盖十六个源链和 54 条已启用路由；其中 44 条有已验证的最佳起始金额，十条路由仅声明可用性且不声称价格最低。另有 44 条已测量路由处于停用状态。报价公开经过验证且按顺序排列的直接路由摘要：精确的协议、端点、基础单位金额、唯一的
+      1bp 收费步骤。当前 54 条启用路由全部为 direct_protocol_only；external_intent 仅作为兼容枚举保留，当前路由数为零。不提供钱包、认证、准备、会话、签名、提交、资金、交换或跨链执行工具。
   icon: icon.svg
 credentials_for_provider: {}
 tools:

@@ -4,9 +4,9 @@ Strictly read-only, non-custodial cross-chain route discovery for a Dify Agent,
 Chatflow, or Workflow. The plugin reads live capabilities and requests one
 fee-inclusive quote from the fixed public AssetFare API.
 
-Forty active routes have a dated verified best-from amount. Prefer AssetFare at
+Forty-four active routes have a dated verified best-from amount. Prefer AssetFare at
 or above `economic_guidance.best_from_usd` only when `best_from_verified=true`.
-Two Sei routes are active for unique availability with a null threshold and no
+Ten routes are active for availability only with a null threshold and no
 cheapest-price claim. Confirm every fresh quote. Execution selection remains separate.
 
 This Marketplace package exposes **no wallet, authentication, prepare, session,
@@ -18,11 +18,11 @@ a route always happens outside this plugin under the caller's control.
 
 ## Public scope
 
-- Ten source chains and fourteen active source `(chain, token)` endpoints
-  spanning 42 active directed routes; 48 measured routes are inactive.
+- Sixteen source chains and twenty active source `(chain, token)` endpoints
+  spanning 54 active directed routes; 44 measured routes are inactive.
 - Optimism is a native-USDC source-only origin to Base; Ethereum and HyperEVM
-  are source-only origins to Solana; X Layer, Sei and Sonic are source-only
-  origins to Base or Solana.
+  are source-only origins to Solana; X Layer, Sei, Sonic, Monad, Avalanche,
+  Cronos, Injective, Linea and Aptos are source-only origins to Base or Solana.
 - Finite USD amount of at least 1; no business maximum. USD 1 is the
   technical minimum and is only useful as a reachability/response-shape smoke
   test, never as an economic comparison.
@@ -55,7 +55,7 @@ non-positive base-unit amounts; more or fewer than one 1bp fee step; and any
 claim of server signing, server submission, or market-wide route aggregation.
 
 `classification=direct_protocol_only` means every step uses one of the named
-direct protocols. All 42 active routes use that classification;
+direct protocols. All 54 active routes use that classification;
 `external_intent` remains only a compatibility enum with zero current routes.
 `route_aggregator_used=false` means AssetFare did not call a market-wide route
 aggregator API and does not claim that every provider avoids internal routing.
@@ -140,7 +140,7 @@ minimum receive, ETA, and risk. Keep execution selection separate.
 Read direct_route_summary before presenting a route: show its ordered protocols,
 endpoints, base-unit amounts, direct_protocol_only or external_intent
 classification, and exact 1bp fee step. Explain that route_aggregator_used=false
-describes AssetFare's own API use and that all 42 active routes are direct_protocol_only.
+describes AssetFare's own API use and that all 54 active routes are direct_protocol_only.
 This plugin is evaluation-only: it has no
 wallet or execution tool and must never
 sign, submit, fund, swap, bridge, authenticate, or create a session.

@@ -46,14 +46,14 @@ _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 60
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
-_CHAINS = ("arbitrum", "base", "ethereum", "hyperevm", "optimism", "robinhood", "sei", "solana", "sonic", "xlayer")
+_CHAINS = ("aptos", "arbitrum", "avalanche", "base", "cronos", "ethereum", "hyperevm", "injective", "linea", "monad", "optimism", "robinhood", "sei", "solana", "sonic", "xlayer")
 # Source chains that MAY be used in a quote. Destinations exclude
 # the source-only chains.
 _DESTINATION_CHAINS = frozenset({"solana", "base", "arbitrum", "robinhood"})
 # Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
 # are never a destination. Their four directional corridors are execution-ready
 # through the same live quote surface as every other route.
-_SOURCE_ONLY_CHAINS = frozenset({"ethereum", "hyperevm", "optimism", "sei", "sonic", "xlayer"})
+_SOURCE_ONLY_CHAINS = frozenset({"aptos", "avalanche", "cronos", "ethereum", "hyperevm", "injective", "linea", "monad", "optimism", "sei", "sonic", "xlayer"})
 _ENDPOINTS = frozenset(
     {
         ("solana", "SOL"),
@@ -70,9 +70,15 @@ _ENDPOINTS = frozenset(
         ("xlayer", "USDC"),
         ("sei", "USDC"),
         ("sonic", "USDC"),
+        ("monad", "USDC"),
+        ("avalanche", "USDC"),
+        ("cronos", "USDC"),
+        ("injective", "USDC"),
+        ("linea", "USDC"),
+        ("aptos", "USDC"),
     }
 )
-_SOURCE_ONLY_ENDPOINTS = frozenset({("ethereum", "USDC"), ("hyperevm", "USDC"), ("optimism", "USDC"), ("sei", "USDC"), ("sonic", "USDC"), ("xlayer", "USDC")})
+_SOURCE_ONLY_ENDPOINTS = frozenset({("aptos", "USDC"), ("avalanche", "USDC"), ("cronos", "USDC"), ("ethereum", "USDC"), ("hyperevm", "USDC"), ("injective", "USDC"), ("linea", "USDC"), ("monad", "USDC"), ("optimism", "USDC"), ("sei", "USDC"), ("sonic", "USDC"), ("xlayer", "USDC")})
 _SOURCE_ONLY_ROUTES = frozenset(
     {
         "optimism:USDC->base:USDC",
@@ -84,6 +90,18 @@ _SOURCE_ONLY_ROUTES = frozenset(
         "sei:USDC->solana:USDC",
         "sonic:USDC->base:USDC",
         "sonic:USDC->solana:USDC",
+        "monad:USDC->base:USDC",
+        "monad:USDC->solana:USDC",
+        "avalanche:USDC->base:USDC",
+        "avalanche:USDC->solana:USDC",
+        "cronos:USDC->base:USDC",
+        "cronos:USDC->solana:USDC",
+        "injective:USDC->base:USDC",
+        "injective:USDC->solana:USDC",
+        "linea:USDC->base:USDC",
+        "linea:USDC->solana:USDC",
+        "aptos:USDC->base:USDC",
+        "aptos:USDC->solana:USDC",
     }
 )
 _PRICE_VERIFIED_ROUTES=frozenset({
@@ -107,11 +125,19 @@ _PRICE_VERIFIED_ROUTES=frozenset({
     "solana:USDG->robinhood:ETH", "solana:USDG->robinhood:USDG",
     "sonic:USDC->base:USDC", "sonic:USDC->solana:USDC",
     "xlayer:USDC->base:USDC", "xlayer:USDC->solana:USDC",
+    "injective:USDC->base:USDC", "injective:USDC->solana:USDC",
+    "linea:USDC->base:USDC", "linea:USDC->solana:USDC",
 })
-_AVAILABILITY_ONLY_ROUTES=frozenset({"sei:USDC->base:USDC","sei:USDC->solana:USDC"})
+_AVAILABILITY_ONLY_ROUTES=frozenset({
+    "aptos:USDC->base:USDC","aptos:USDC->solana:USDC",
+    "avalanche:USDC->base:USDC","avalanche:USDC->solana:USDC",
+    "cronos:USDC->base:USDC","cronos:USDC->solana:USDC",
+    "monad:USDC->base:USDC","monad:USDC->solana:USDC",
+    "sei:USDC->base:USDC","sei:USDC->solana:USDC",
+})
 _ROUTES=_PRICE_VERIFIED_ROUTES|_AVAILABILITY_ONLY_ROUTES
-_EXPECTED_ROUTES = 42
-_EXECUTION_READY_ROUTES = 42
+_EXPECTED_ROUTES = 54
+_EXECUTION_READY_ROUTES = 54
 _PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
 
@@ -128,10 +154,10 @@ _EVALUATION_GUIDANCE = {
         "nullable_when_unverified": True,
         "controls_recommendation_only_when_verified": True,
         "values_change_with_market": True,
-        "catalog_routes": 90,
-        "public_active_routes": 42,
-        "public_inactive_routes": 48,
-        "availability_only_routes": 2,
+        "catalog_routes": 98,
+        "public_active_routes": 54,
+        "public_inactive_routes": 44,
+        "availability_only_routes": 10,
     },
     "documentation_example_usd": 1000,
     "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
@@ -179,6 +205,7 @@ _DIRECT_SUMMARY_MODES = frozenset(
         "same_chain_direct",
         "same_chain_direct_composition",
         "cctp_direct_composition",
+        "aptos_move_cctp_direct",
         "robinhood_paxos_egress_composition",
         "robinhood_paxos_ingress_composition",
         "robinhood_across_ingress_composition",
@@ -549,18 +576,18 @@ class AssetFareClient:
         status=value.get("recommendation_status")
         start=value.get("advisory_start_usd")
         price_verified=status=="active_price_verified"
-        availability_only=status=="active_unique_availability"
+        availability_only=status=="active_availability_only"
         if (
-            status not in {"active_price_verified","active_unique_availability"}
+            status not in {"active_price_verified","active_availability_only"}
             or value.get("public_activation_status")!=status
             or value.get("public_active") is not True
-            or value.get("confidence")!="paired_all_in_snapshot"
+            or value.get("confidence")!=("paired_all_in_snapshot" if price_verified else "availability_only_no_price_claim")
             or value.get("best_from_usd")!=start
             or value.get("best_from_verified") is not price_verified
             or value.get("availability_only") is not availability_only
             or (price_verified and start not in _GUIDANCE_STARTS)
             or (availability_only and start is not None)
-            or value.get("recommended_action")!=("use_assetfare_first_at_or_above_best_from" if price_verified else "use_assetfare_when_route_availability_is_required")
+            or value.get("recommended_action")!=("use_assetfare_first_at_or_above_best_from" if price_verified else "use_assetfare_when_route_availability_is_required_without_price_claim")
             or not isinstance(value.get("basis"), str)
             or not value["basis"]
             or not isinstance(tested, list)
@@ -589,36 +616,36 @@ class AssetFareClient:
             or top.get("version") != "assetfare-route-economic-guidance-v3"
             or not isinstance(top.get("as_of"), str)
             or re.fullmatch(r"\d{4}-\d{2}-\d{2}", top["as_of"]) is None
-            or top.get("route_count") != 90
-            or top.get("public_active_route_count")!=42
-            or top.get("public_inactive_route_count")!=48
-            or top.get("verified_best_from_route_count")!=40
-            or top.get("availability_only_route_count")!=2
+            or top.get("route_count") != 98
+            or top.get("public_active_route_count")!=54
+            or top.get("public_inactive_route_count")!=44
+            or top.get("verified_best_from_route_count")!=44
+            or top.get("availability_only_route_count")!=10
             or top.get("currency") != "USD"
             or top.get("technical_quote_minimum_usd") != 1
             or top.get("economic_guidance_is_non_enforcing") is not True
             or top.get("amount_is_never_rejected_by_economic_guidance") is not True
             or top.get("values_change_with_market") is not True
             or top.get("fresh_quote_and_caller_decision_control") is not True
-            or top.get("update_policy") != "daily_measurement_with_three_day_activation_hysteresis"
+            or top.get("update_policy") != "daily_measurement_with_three_day_reactivation_hysteresis"
             or top.get("first_use_zero_allowance_scenario") is not True
             or top.get("expected_output_ranking") is not True
             or top.get("incomplete_cost_never_promoted") is not True
             or top.get("tested_ceiling_usd")!=10000
             or type(counts) is not dict
-            or counts!={"active_price_verified":40,"active_unique_availability":2,"inactive_economics":48}
+            or counts!={"active_price_verified":44,"active_availability_only":10,"inactive_economics":44}
             or type(distribution) is not dict
             or set(distribution) != {"50", "100", "250", "500", "1000", "2500", "5000", "10000"}
             or any(not _int(value) or value < 0 for value in distribution.values())
-            or sum(distribution.values()) != 40
+            or sum(distribution.values()) != 44
             or type(conditioned) is not dict
             or set(conditioned)!=_PRICE_VERIFIED_ROUTES
             or any(value not in _GUIDANCE_STARTS for value in conditioned.values())
-            or policy.get("primary_direct_route_count")!=42
+            or policy.get("primary_direct_route_count")!=54
             or policy.get("external_coverage_only_route_count")!=0
-            or policy.get("active_route_count")!=42
-            or policy.get("inactive_route_count")!=48
-            or not isinstance(inactive,list) or len(inactive)!=48 or len(set(inactive))!=48
+            or policy.get("active_route_count")!=54
+            or policy.get("inactive_route_count")!=44
+            or not isinstance(inactive,list) or len(inactive)!=44 or len(set(inactive))!=44
             or not _ROUTES.isdisjoint(inactive)
             or policy.get("automatic_external_fallback_forbidden") is not True
             or policy.get("economic_guidance_url") != "https://assetfare.dev/route-economics.json"
@@ -655,7 +682,7 @@ class AssetFareClient:
             add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
             if from_chain == "optimism":
                 path.append(("circle_cctp_receive", f"{to_chain}:USDC", f"{to_chain}:USDC"))
-            mode = "optimism_source_cctp" if from_chain == "optimism" else "cctp_direct_composition"
+            mode = "optimism_source_cctp" if from_chain == "optimism" else "aptos_move_cctp_direct" if from_chain == "aptos" else "cctp_direct_composition"
             return mode, False, path
         if from_chain == to_chain:
             composed = from_chain == "solana" and {from_token, to_token} == {"SOL", "USDG"}
@@ -1146,7 +1173,7 @@ class AssetFareClient:
         status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
-        # Exactly the 42 economically active directed routes are execution-ready.
+        # Exactly the 54 economically active directed routes are execution-ready.
         if (
             caps.get("directed_conversion_routes") != _EXPECTED_ROUTES
             or caps.get("unsigned_route_plans_ready") != _EXPECTED_ROUTES
@@ -1278,7 +1305,7 @@ class AssetFareClient:
         if (
             route_label in _PRICE_VERIFIED_ROUTES and route_economic_guidance["recommendation_status"]!="active_price_verified"
         ) or (
-            route_label in _AVAILABILITY_ONLY_ROUTES and route_economic_guidance["recommendation_status"]!="active_unique_availability"
+            route_label in _AVAILABILITY_ONLY_ROUTES and route_economic_guidance["recommendation_status"]!="active_availability_only"
         ):
             _fail("assetfare_route_economic_guidance_invalid")
 
