@@ -1403,7 +1403,19 @@ class AssetFareClient:
         for row in components:
             if not isinstance(row,dict) or not _finite(row.get("expected_usd")) or not _finite(row.get("maximum_usd")) or float(row["expected_usd"])<0 or float(row["maximum_usd"])<float(row["expected_usd"]):_fail("assetfare_cost_summary_invalid")
             component_expected+=float(row["expected_usd"]);component_maximum+=float(row["maximum_usd"])
-        if component_expected>expected_cost+0.000001 or component_maximum>maximum_cost+0.000001 or small!=(float(cost["maximum_total_cost_percent"])>=1) or (small and not isinstance(cost.get("warning"),str)) or (not small and cost.get("warning") is not None):_fail("assetfare_cost_summary_invalid")
+        separately=cost.get("separately_paid_costs");current=isinstance(separately,list)
+        separate_expected=separate_maximum=0.0
+        if current:
+            required=("token_path_expected_cost_usd","token_path_maximum_cost_usd","expected_all_in_cost_usd_estimate","maximum_all_in_cost_usd_estimate","expected_all_in_cost_percent_estimate","maximum_all_in_cost_percent_estimate","all_in_estimate_complete","native_balance_requirements","source_native_balance_required")
+            if not all(key in cost for key in required) or not isinstance(cost["all_in_estimate_complete"],bool) or not isinstance(cost["native_balance_requirements"],list):_fail("assetfare_cost_summary_invalid")
+            for row in separately:
+                if not isinstance(row,dict) or row.get("kind") not in {"layerzero_native_fee","source_chain_network_fee_estimate"} or not isinstance(row.get("paid_in"),str) or row.get("included_in_receive_amount") is not False or not _finite(row.get("expected_usd")) or not _finite(row.get("maximum_usd")) or float(row["expected_usd"])<0 or float(row["maximum_usd"])<float(row["expected_usd"]):_fail("assetfare_cost_summary_invalid")
+                separate_expected+=float(row["expected_usd"]);separate_maximum+=float(row["maximum_usd"])
+            if not close(cost["token_path_expected_cost_usd"],expected_cost) or not close(cost["token_path_maximum_cost_usd"],maximum_cost) or not close(cost["expected_all_in_cost_usd_estimate"],expected_cost+separate_expected) or not close(cost["maximum_all_in_cost_usd_estimate"],maximum_cost+separate_maximum) or not close(cost["expected_all_in_cost_percent_estimate"],(expected_cost+separate_expected)/amount*100,0.0001) or not close(cost["maximum_all_in_cost_percent_estimate"],(maximum_cost+separate_maximum)/amount*100,0.0001):_fail("assetfare_cost_summary_invalid")
+            source_required=cost["source_native_balance_required"]
+            if source_required is not None and (not isinstance(source_required,dict) or source_required.get("included_in_receive_amount") is not False or not isinstance(source_required.get("paid_in"),str) or not str(source_required.get("expected_amount_base") or "").isdigit() or not str(source_required.get("maximum_amount_base") or "").isdigit() or int(source_required["maximum_amount_base"])<int(source_required["expected_amount_base"])):_fail("assetfare_cost_summary_invalid")
+        warning_percent=float(cost["maximum_all_in_cost_percent_estimate"]) if current else float(cost["maximum_total_cost_percent"])
+        if component_expected>expected_cost+0.000001 or component_maximum>maximum_cost+0.000001 or small!=(warning_percent>=1) or (small and not isinstance(cost.get("warning"),str)) or (not small and cost.get("warning") is not None):_fail("assetfare_cost_summary_invalid")
         eta_summary=data.get("eta")
         if eta_summary is not None:
             if not isinstance(eta_summary,dict) or eta_summary.get("estimated_time_seconds")!=eta or not isinstance(eta_summary.get("complete_route_estimate"),bool):_fail("assetfare_eta_invalid")

@@ -46,7 +46,7 @@ def test_client_has_no_action_methods_and_no_old_fee_maximum():
 
 def test_manifest_separates_product_and_format_versions_and_surfaces_route_transparency():
     manifest = yaml.safe_load((ROOT / "manifest.yaml").read_text())
-    assert manifest["version"] == "1.0.5"
+    assert manifest["version"] == "1.0.6"
     # This is Dify's manifest-format version, not the AssetFare product version.
     assert manifest["meta"]["version"] == "0.0.11"
     description = manifest["description"]["en_US"].lower()
