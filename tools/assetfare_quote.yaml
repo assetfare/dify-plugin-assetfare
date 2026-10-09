@@ -13,7 +13,7 @@ description:
     components, ETA, live availability, direct_route_summary, and a sanitized continuation_descriptor. Treat direct_route_summary as the validated
     ordered path: every step names the protocol, normalized endpoints, expected/minimum base-unit inputs and
     outputs, direct-versus-external classification, and the one exact 1bp fee index.
-    route_aggregator_used=false means AssetFare did not call a market-wide aggregator API. All 54 active
+    route_aggregator_used=false means AssetFare did not call a market-wide aggregator API. All 100 available
     routes are direct_protocol_only; external_intent remains only a compatibility enum with zero current routes.
     The USD 1 technical minimum is only for reachability/response-shape smoke tests.
     Use economic_guidance.best_from_usd only when best_from_verified=true. Availability-only routes have a null
@@ -33,7 +33,7 @@ parameters:
     human_description:
       en_US: The source chain to move value from.
       zh_Hans: 转出价值的源链。
-    llm_description: source chain, one of solana, base, arbitrum, robinhood, optimism, ethereum, hyperevm, xlayer, sei, sonic, monad, avalanche, cronos, injective, linea, aptos; source-only routes include Optimism to Base, Ethereum/HyperEVM to Solana, and X Layer/Sei/Sonic/Monad/Avalanche/Cronos/Injective/Linea/Aptos to Base or Solana; check live availability
+    llm_description: source chain, one of solana, base, arbitrum, robinhood, polygon, optimism, ethereum, hyperevm, xlayer, sei, sonic, monad, avalanche, cronos, injective, linea, aptos, unichain, ink; source-only routes include Polygon/Optimism to Base or Arbitrum, Ethereum/HyperEVM to Base or Solana, X Layer/Sei/Sonic/Monad/Avalanche/Cronos/Injective/Linea/Aptos to Base or Solana, and Unichain/Ink to Solana; check live availability
     options:
       - value: solana
         label: {en_US: solana, zh_Hans: solana}
@@ -45,6 +45,8 @@ parameters:
         label: {en_US: robinhood, zh_Hans: robinhood}
       - value: optimism
         label: {en_US: optimism, zh_Hans: optimism}
+      - value: polygon
+        label: {en_US: polygon, zh_Hans: polygon}
       - value: ethereum
         label: {en_US: ethereum, zh_Hans: ethereum}
       - value: hyperevm
@@ -67,6 +69,10 @@ parameters:
         label: {en_US: linea, zh_Hans: linea}
       - value: aptos
         label: {en_US: aptos, zh_Hans: aptos}
+      - value: unichain
+        label: {en_US: unichain, zh_Hans: unichain}
+      - value: ink
+        label: {en_US: ink, zh_Hans: ink}
   - name: from_token
     type: select
     required: true

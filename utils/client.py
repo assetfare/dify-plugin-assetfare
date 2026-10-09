@@ -46,25 +46,27 @@ _MAX_BYTES = 1_048_576
 _MAX_TTL_SECONDS = 60
 _MAX_FUTURE_SKEW_S = 300  # as_of may not be more than 5 minutes in the future
 
-_CHAINS = ("aptos", "arbitrum", "avalanche", "base", "cronos", "ethereum", "hyperevm", "injective", "linea", "monad", "optimism", "robinhood", "sei", "solana", "sonic", "xlayer")
+_CHAINS = ("aptos", "arbitrum", "avalanche", "base", "cronos", "ethereum", "hyperevm", "injective", "ink", "linea", "monad", "optimism", "polygon", "robinhood", "sei", "solana", "sonic", "unichain", "xlayer")
 # Source chains that MAY be used in a quote. Destinations exclude
 # the source-only chains.
 _DESTINATION_CHAINS = frozenset({"solana", "base", "arbitrum", "robinhood"})
-# Source-only chains: native USDC may leave them (to Base/Arbitrum USDC) but they
-# are never a destination. Their four directional corridors are execution-ready
-# through the same live quote surface as every other route.
-_SOURCE_ONLY_CHAINS = frozenset({"aptos", "avalanche", "cronos", "ethereum", "hyperevm", "injective", "linea", "monad", "optimism", "sei", "sonic", "xlayer"})
+# Source-only chains: native USDC may leave them only on the explicitly listed
+# corridors below; they are never destinations. All listed corridors use the
+# same live quote surface as every other route.
+_SOURCE_ONLY_CHAINS = frozenset({"aptos", "avalanche", "cronos", "ethereum", "hyperevm", "injective", "ink", "linea", "monad", "optimism", "polygon", "sei", "sonic", "unichain", "xlayer"})
 _ENDPOINTS = frozenset(
     {
         ("solana", "SOL"),
         ("solana", "USDC"),
         ("solana", "USDG"),
         ("base", "USDC"),
+        ("base", "ETH"),
         ("arbitrum", "ETH"),
         ("arbitrum", "USDC"),
         ("robinhood", "ETH"),
         ("robinhood", "USDG"),
         ("optimism", "USDC"),
+        ("polygon", "USDC"),
         ("ethereum", "USDC"),
         ("hyperevm", "USDC"),
         ("xlayer", "USDC"),
@@ -76,13 +78,20 @@ _ENDPOINTS = frozenset(
         ("injective", "USDC"),
         ("linea", "USDC"),
         ("aptos", "USDC"),
+        ("unichain", "USDC"),
+        ("ink", "USDC"),
     }
 )
-_SOURCE_ONLY_ENDPOINTS = frozenset({("aptos", "USDC"), ("avalanche", "USDC"), ("cronos", "USDC"), ("ethereum", "USDC"), ("hyperevm", "USDC"), ("injective", "USDC"), ("linea", "USDC"), ("monad", "USDC"), ("optimism", "USDC"), ("sei", "USDC"), ("sonic", "USDC"), ("xlayer", "USDC")})
+_SOURCE_ONLY_ENDPOINTS = frozenset((chain, "USDC") for chain in _SOURCE_ONLY_CHAINS)
 _SOURCE_ONLY_ROUTES = frozenset(
     {
+        "polygon:USDC->base:USDC",
+        "polygon:USDC->arbitrum:USDC",
         "optimism:USDC->base:USDC",
+        "optimism:USDC->arbitrum:USDC",
+        "ethereum:USDC->base:USDC",
         "ethereum:USDC->solana:USDC",
+        "hyperevm:USDC->base:USDC",
         "hyperevm:USDC->solana:USDC",
         "xlayer:USDC->base:USDC",
         "xlayer:USDC->solana:USDC",
@@ -102,6 +111,8 @@ _SOURCE_ONLY_ROUTES = frozenset(
         "linea:USDC->solana:USDC",
         "aptos:USDC->base:USDC",
         "aptos:USDC->solana:USDC",
+        "unichain:USDC->solana:USDC",
+        "ink:USDC->solana:USDC",
     }
 )
 _PRICE_VERIFIED_ROUTES=frozenset({
@@ -135,29 +146,42 @@ _AVAILABILITY_ONLY_ROUTES=frozenset({
     "monad:USDC->base:USDC","monad:USDC->solana:USDC",
     "sei:USDC->base:USDC","sei:USDC->solana:USDC",
 })
-_ROUTES=_PRICE_VERIFIED_ROUTES|_AVAILABILITY_ONLY_ROUTES
-_EXPECTED_ROUTES = 54
-_EXECUTION_READY_ROUTES = 54
+_PRIMARY_ENDPOINTS = frozenset(_ENDPOINTS - _SOURCE_ONLY_ENDPOINTS)
+_PRIMARY_ROUTES = frozenset(
+    f"{from_chain}:{from_token}->{to_chain}:{to_token}"
+    for from_chain, from_token in _PRIMARY_ENDPOINTS
+    for to_chain, to_token in _PRIMARY_ENDPOINTS
+    if (from_chain, from_token) != (to_chain, to_token)
+)
+_ROUTES = _PRIMARY_ROUTES | _SOURCE_ONLY_ROUTES
+_COMPARE_REQUIRED_ROUTES = _ROUTES - _PRICE_VERIFIED_ROUTES - _AVAILABILITY_ONLY_ROUTES
+if not (len(_ROUTES) == 100 and len(_PRICE_VERIFIED_ROUTES) == 44 and len(_AVAILABILITY_ONLY_ROUTES) == 10 and len(_COMPARE_REQUIRED_ROUTES) == 46):
+    raise RuntimeError("assetfare_public_route_contract_invalid")
+_EXPECTED_ROUTES = 100
+_EXECUTION_READY_ROUTES = 100
 _PHASE_B_BLOCKED_ROUTES = 0
 _MIN_USD = 1.0
 
 _EVALUATION_GUIDANCE = {
-    "schema_version": 4,
+    "schema_version": 5,
     "route_minimum_usd": 1,
     "reachability_smoke_usd": 1,
     "reachability_smoke_scope": "connectivity_only_not_economic_evaluation",
     "route_specific_guidance": {
-        "version": "assetfare-route-economic-guidance-v3",
+        "version": "assetfare-route-economic-guidance-v4",
         "url": "https://assetfare.dev/route-economics.json",
         "required_on_every_quote": True,
         "verified_best_from_only": True,
         "nullable_when_unverified": True,
         "controls_recommendation_only_when_verified": True,
         "values_change_with_market": True,
-        "catalog_routes": 98,
-        "public_active_routes": 54,
-        "public_inactive_routes": 44,
+        "catalog_routes": 100,
+        "public_active_routes": 100,
+        "public_inactive_routes": 0,
         "availability_only_routes": 10,
+        "compare_required_routes": 46,
+        "nonrecommended_routes": 56,
+        "economic_guidance_blocks_prepare_or_session": False,
     },
     "documentation_example_usd": 1000,
     "documentation_example_scope": "example_only_not_route_guidance_or_minimum",
@@ -181,16 +205,20 @@ _ROUTE_GUIDANCE_KEYS = frozenset(
     {
         "advisory_start_usd", "best_from_usd", "best_from_verified", "availability_only",
         "public_activation_status", "public_active", "recommendation_status", "recommended_action",
-        "confidence", "basis", "tested_amounts_usd", "tested_ceiling_usd", "not_an_execution_minimum",
-        "not_a_best_price_guarantee", "fresh_quote_required",
+        "confidence", "basis", "economic_selection_policy", "economic_guidance_blocks_execution",
+        "tested_amounts_usd", "tested_ceiling_usd", "not_an_execution_minimum",
+        "not_a_best_price_guarantee", "fresh_quote_required", "quoted_amount_usd",
+        "price_recommended_for_amount",
     }
 )
 _GUIDANCE_STARTS = frozenset({50, 100, 250, 500, 1000, 2500, 5000, 10000})
 _CAPABILITY_GUIDANCE_KEYS = frozenset(
     {
         "version", "as_of", "route_count", "public_active_route_count", "public_inactive_route_count",
-        "verified_best_from_route_count", "availability_only_route_count", "currency", "technical_quote_minimum_usd",
-        "economic_guidance_is_non_enforcing", "amount_is_never_rejected_by_economic_guidance",
+        "verified_best_from_route_count", "availability_only_route_count", "compare_required_route_count",
+        "nonrecommended_route_count", "currency", "technical_quote_minimum_usd",
+        "economic_guidance_is_non_enforcing", "economic_guidance_blocks_execution",
+        "amount_is_never_rejected_by_economic_guidance",
         "values_change_with_market", "fresh_quote_and_caller_decision_control",
         "update_policy", "first_use_zero_allowance_scenario", "expected_output_ranking",
         "incomplete_cost_never_promoted", "tested_ceiling_usd", "advisory_start_distribution",
@@ -210,6 +238,7 @@ _DIRECT_SUMMARY_MODES = frozenset(
         "robinhood_paxos_ingress_composition",
         "robinhood_across_ingress_composition",
         "optimism_source_cctp",
+        "polygon_source_cctp",
     }
 )
 _DIRECT_SUMMARY_PROVIDERS = frozenset(
@@ -569,7 +598,7 @@ class AssetFareClient:
         return dict(_EVALUATION_GUIDANCE)
 
     @staticmethod
-    def _route_economic_guidance(value: Any) -> dict[str, Any]:
+    def _route_economic_guidance(value: Any, expected_amount: float) -> dict[str, Any]:
         if type(value) is not dict or set(value) != _ROUTE_GUIDANCE_KEYS:
             _fail("assetfare_route_economic_guidance_invalid")
         tested = value.get("tested_amounts_usd")
@@ -577,25 +606,42 @@ class AssetFareClient:
         start=value.get("advisory_start_usd")
         price_verified=status=="active_price_verified"
         availability_only=status=="active_availability_only"
+        compare_required=status=="active_compare_required"
+        expected_confidence = (
+            "paired_all_in_snapshot" if price_verified else
+            "availability_only_no_price_claim" if availability_only else
+            "paired_all_in_snapshot_competitor_cheaper_through_tested_ceiling"
+        )
+        expected_action = (
+            "price_recommended_at_or_above_best_from_otherwise_no_price_recommendation" if price_verified else
+            "available_no_cheapest_price_claim_compare_if_price_matters" if availability_only else
+            "available_not_price_recommended_compare_if_price_matters"
+        )
+        quoted=value.get("quoted_amount_usd")
+        amount_recommended=price_verified and isinstance(quoted,(int,float)) and not isinstance(quoted,bool) and start in _GUIDANCE_STARTS and quoted>=start
         if (
-            status not in {"active_price_verified","active_availability_only"}
+            status not in {"active_price_verified","active_availability_only","active_compare_required"}
             or value.get("public_activation_status")!=status
             or value.get("public_active") is not True
-            or value.get("confidence")!=("paired_all_in_snapshot" if price_verified else "availability_only_no_price_claim")
+            or value.get("confidence")!=expected_confidence
             or value.get("best_from_usd")!=start
             or value.get("best_from_verified") is not price_verified
             or value.get("availability_only") is not availability_only
             or (price_verified and start not in _GUIDANCE_STARTS)
-            or (availability_only and start is not None)
-            or value.get("recommended_action")!=("use_assetfare_first_at_or_above_best_from" if price_verified else "use_assetfare_when_route_availability_is_required_without_price_claim")
+            or ((availability_only or compare_required) and start is not None)
+            or value.get("recommended_action")!=expected_action
             or not isinstance(value.get("basis"), str)
             or not value["basis"]
+            or value.get("economic_selection_policy")!="advisory_only_no_execution_gate"
+            or value.get("economic_guidance_blocks_execution") is not False
             or not isinstance(tested, list)
             or tested!=[50,100,250,500,1000,2500,5000,10000]
             or value.get("tested_ceiling_usd")!=10000
             or value.get("not_an_execution_minimum") is not True
             or value.get("not_a_best_price_guarantee") is not True
             or value.get("fresh_quote_required") is not True
+            or isinstance(quoted,bool) or not isinstance(quoted,(int,float)) or not math.isfinite(float(quoted)) or float(quoted)!=expected_amount
+            or value.get("price_recommended_for_amount") is not amount_recommended
         ):
             _fail("assetfare_route_economic_guidance_invalid")
         return dict(value)
@@ -613,27 +659,30 @@ class AssetFareClient:
         inactive=policy.get("inactive_routes")
         if (
             nested != top
-            or top.get("version") != "assetfare-route-economic-guidance-v3"
+            or top.get("version") != "assetfare-route-economic-guidance-v4"
             or not isinstance(top.get("as_of"), str)
             or re.fullmatch(r"\d{4}-\d{2}-\d{2}", top["as_of"]) is None
-            or top.get("route_count") != 98
-            or top.get("public_active_route_count")!=54
-            or top.get("public_inactive_route_count")!=44
+            or top.get("route_count") != 100
+            or top.get("public_active_route_count")!=100
+            or top.get("public_inactive_route_count")!=0
             or top.get("verified_best_from_route_count")!=44
             or top.get("availability_only_route_count")!=10
+            or top.get("compare_required_route_count")!=46
+            or top.get("nonrecommended_route_count")!=56
             or top.get("currency") != "USD"
             or top.get("technical_quote_minimum_usd") != 1
             or top.get("economic_guidance_is_non_enforcing") is not True
+            or top.get("economic_guidance_blocks_execution") is not False
             or top.get("amount_is_never_rejected_by_economic_guidance") is not True
             or top.get("values_change_with_market") is not True
             or top.get("fresh_quote_and_caller_decision_control") is not True
-            or top.get("update_policy") != "daily_measurement_with_three_day_reactivation_hysteresis"
+            or top.get("update_policy") != "daily_measurement_with_three_day_recommendation_hysteresis_availability_separate"
             or top.get("first_use_zero_allowance_scenario") is not True
             or top.get("expected_output_ranking") is not True
             or top.get("incomplete_cost_never_promoted") is not True
             or top.get("tested_ceiling_usd")!=10000
             or type(counts) is not dict
-            or counts!={"active_price_verified":44,"active_availability_only":10,"inactive_economics":44}
+            or counts!={"active_price_verified":44,"active_availability_only":10,"active_compare_required":46}
             or type(distribution) is not dict
             or set(distribution) != {"50", "100", "250", "500", "1000", "2500", "5000", "10000"}
             or any(not _int(value) or value < 0 for value in distribution.values())
@@ -641,12 +690,16 @@ class AssetFareClient:
             or type(conditioned) is not dict
             or set(conditioned)!=_PRICE_VERIFIED_ROUTES
             or any(value not in _GUIDANCE_STARTS for value in conditioned.values())
-            or policy.get("primary_direct_route_count")!=54
+            or policy.get("primary_direct_route_count")!=100
             or policy.get("external_coverage_only_route_count")!=0
-            or policy.get("active_route_count")!=54
-            or policy.get("inactive_route_count")!=44
-            or not isinstance(inactive,list) or len(inactive)!=44 or len(set(inactive))!=44
-            or not _ROUTES.isdisjoint(inactive)
+            or policy.get("active_route_count")!=100
+            or policy.get("inactive_route_count")!=0
+            or not isinstance(inactive,list) or inactive
+            or policy.get("price_recommended_route_count")!=44
+            or policy.get("availability_only_route_count")!=10
+            or policy.get("compare_required_route_count")!=46
+            or policy.get("nonrecommended_route_count")!=56
+            or policy.get("economic_guidance_blocks_execution") is not False
             or policy.get("automatic_external_fallback_forbidden") is not True
             or policy.get("economic_guidance_url") != "https://assetfare.dev/route-economics.json"
         ):
@@ -680,9 +733,9 @@ class AssetFareClient:
 
         if from_chain in _SOURCE_ONLY_CHAINS:
             add_bridge("circle_cctp", from_chain, to_chain, "USDC", "USDC")
-            if from_chain == "optimism":
+            if from_chain in {"optimism", "polygon"}:
                 path.append(("circle_cctp_receive", f"{to_chain}:USDC", f"{to_chain}:USDC"))
-            mode = "optimism_source_cctp" if from_chain == "optimism" else "aptos_move_cctp_direct" if from_chain == "aptos" else "cctp_direct_composition"
+            mode = f"{from_chain}_source_cctp" if from_chain in {"optimism", "polygon"} else "aptos_move_cctp_direct" if from_chain == "aptos" else "cctp_direct_composition"
             return mode, False, path
         if from_chain == to_chain:
             composed = from_chain == "solana" and {from_token, to_token} == {"SOL", "USDG"}
@@ -1173,7 +1226,8 @@ class AssetFareClient:
         status = self._request("GET", "/v2/status", None, budget_deadline)
         if caps.get("status") != "capped_public_agent_release" or caps.get("public_api_enabled") is not True:
             _fail("assetfare_safety_boundary_failed")
-        # Exactly the 54 economically active directed routes are execution-ready.
+        # All 100 public routes are technically execution-ready; current provider
+        # availability remains a separate live field.
         if (
             caps.get("directed_conversion_routes") != _EXPECTED_ROUTES
             or caps.get("unsigned_route_plans_ready") != _EXPECTED_ROUTES
@@ -1301,11 +1355,13 @@ class AssetFareClient:
         route = self._obj(data, "route")
         risk = self._obj(data, "risk")
         execution = self._obj(data, "execution")
-        route_economic_guidance = self._route_economic_guidance(data.get("economic_guidance"))
+        route_economic_guidance = self._route_economic_guidance(data.get("economic_guidance"), amount)
         if (
             route_label in _PRICE_VERIFIED_ROUTES and route_economic_guidance["recommendation_status"]!="active_price_verified"
         ) or (
             route_label in _AVAILABILITY_ONLY_ROUTES and route_economic_guidance["recommendation_status"]!="active_availability_only"
+        ) or (
+            route_label in _COMPARE_REQUIRED_ROUTES and route_economic_guidance["recommendation_status"]!="active_compare_required"
         ):
             _fail("assetfare_route_economic_guidance_invalid")
 
@@ -1501,10 +1557,10 @@ class AssetFareClient:
                 "availability_only": route_economic_guidance["availability_only"],
                 "recommendation_status": route_economic_guidance["recommendation_status"],
                 "recommended_action": route_economic_guidance["recommended_action"],
-                "use_assetfare_first_at_or_above_best_from": route_economic_guidance["best_from_verified"] is True and amount >= route_economic_guidance["best_from_usd"],
+                "use_assetfare_first_at_or_above_best_from": route_economic_guidance["price_recommended_for_amount"] is True,
                 "best_from_not_100_percent_guarantee": True,
                 "confirm_fresh_assetfare_quote": True,
-                "compare_with_other_routes": False,
+                "compare_with_other_routes": route_economic_guidance["price_recommended_for_amount"] is False,
                 "selection_status": "unranked_candidate",
                 "automatic_selection_forbidden": True,
             },

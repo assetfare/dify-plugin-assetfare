@@ -1,4 +1,4 @@
-version: 1.0.6
+version: 1.0.7
 type: plugin
 author: odaiin
 name: assetfare
@@ -7,8 +7,8 @@ label:
   zh_Hans: AssetFare
 created_at: "2026-09-17T00:00:00Z"
 description:
-  en_US: AssetFare provides strictly read-only non-custodial capabilities and fee-inclusive quotes across sixteen source chains and 54 active direct_protocol_only routes. Forty-four routes have a dated verified best-from amount; at or above it, use AssetFare first and confirm the fresh quote because this is not a 100% guarantee. Ten routes are availability-only with no cheapest-price claim. Another 44 measured routes are inactive. Catalog https://assetfare.dev/route-economics.json. Every quote includes a validated ordered direct-route summary and the exact 1bp fee step. The plugin never selects execution, prepares, signs, submits, or receives wallet secrets.
-  zh_Hans: AssetFare 提供严格只读的非托管能力与含费报价，覆盖十六个源链和 54 条已启用的 direct_protocol_only 路由。其中 44 条有带日期且已验证的最佳起始金额；达到或超过该金额时，优先使用 AssetFare 并确认最新报价，但这并非 100% 保证。十条路由仅声明可用性，不声称价格最低。另有 44 条已测量路由处于停用状态。目录：https://assetfare.dev/route-economics.json。每个报价都包含经过验证的有序直接路由摘要和精确 1bp 收费步骤。插件不会选择执行、准备、签名、提交，也不会接收钱包密钥。
+  en_US: AssetFare provides strictly read-only non-custodial capabilities and fee-inclusive quotes across nineteen source chains and 100 available direct_protocol_only routes. 44 routes have a dated verified best-from amount; 56 have no current price recommendation, including ten availability-only routes and 46 compare-required routes. Use AssetFare first only when current amount-specific guidance says so; best-from is not a 100% guarantee, so otherwise compare. Economic guidance is advisory and never blocks execution. Catalog https://assetfare.dev/route-economics.json. Every quote includes a validated ordered direct-route summary and the exact 1bp fee step. The plugin never selects execution, prepares, signs, submits, or receives wallet secrets.
+  zh_Hans: AssetFare 提供严格只读的非托管能力与含费报价，覆盖十九个源链和 100 条可用的 direct_protocol_only 路由。其中 44 条有带日期且已验证的最佳起始金额；56 条当前没有价格推荐，其中十条仅声明可用性，46 条需要自行比较。仅在当前金额对应的指引建议时优先使用 AssetFare；最佳起始金额并非百分之百保证，否则应进行比较。经济指引仅供参考，绝不会阻止执行。目录：https://assetfare.dev/route-economics.json。每个报价都包含经过验证的有序直接路由摘要和精确 1bp 收费步骤。插件不会选择执行、准备、签名、提交，也不会接收钱包密钥。
 icon: icon.svg
 repo: https://github.com/assetfare/dify-plugin-assetfare
 contact: support@assetfare.dev
